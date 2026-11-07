@@ -310,6 +310,13 @@ nanbeige-best,follow-words,follow,loop,0,0,loop,15260,198.9,False
 nanbeige-best,long-table,endurance,x,0,0,stop,34496,659.1,False
 nanbeige-best,long-hops,longread,ok,1,1,stop,2377,105.1,False
 nanbeige-best,code-regex,code,ok,1,1,stop,87071,2416.2,False
+nanbeige-best,code-scheme,code,x,0,0,stop,87861,2473.2,False
+nanbeige-best,code-ordered,code,x,0,0,stop,95866,2409.1,False
+nanbeige-best,code-diff,code,ok,1,1,stop,76041,2006.3,False
+nanbeige-best,code-sudoku,code,x,0,0,stop,55457,1263.6,False
+nanbeige-best,code-json,code,ok,1,1,stop,46037,928.2,False
+nanbeige-best,code-sat,code,x,0,0,stop,80323,2205.3,False
+nanbeige-best,kitchen,repair,10/10,1.0,1.0,,65367,909.4,False
 nanbeige-best-llamacpp-defaults,trace-1,trace,ok*,0,1,stop,2386,33.0,False
 nanbeige-best-llamacpp-defaults,trace-2,trace,ok,1,1,stop,10421,165.0,False
 nanbeige-best-llamacpp-defaults,trace-3,trace,ok,1,1,stop,16756,284.4,False

@@ -55,7 +55,7 @@ test is at each model's best settings; see `docs/hard-test.md`.
 | Nemotron 3.5 Super VL (120B, 12B active) | maya-nem | Unsloth UD-Q3_K_XL, 65.8 GB | 256K | ~41 tok/s | **17** (0/7) |
 | MiMo-V2.6-Flash-RL | strata-mimo | MXFP4 | 256K | 21-26 tok/s | 12.9 in the 24K round |
 | GLM-5.3-Flash | Project Maya, Maya-S24 | Maya pack with expert skips | 256K | 36-38 tok/s (23 on the exact Maya-M) | 10 in the 24K round; rerun at its best in progress |
-| Nanbeige4.3-33B (dense) | llama.cpp | Q4_K_M, 20.8 GB | 80K (96K for the test) | 66-69 tok/s | 9.8 in the 24K round; rerun at its best in progress |
+| Nanbeige4.3-33B (dense) | llama.cpp | Q4_K_M, 20.8 GB | 80K (96K for the test) | 66-69 tok/s **18** (3/7) at its best, with 96K context; 9.8 in the 24K round |
 
 `docs/models.md` has each model's architecture, quant choice, engine settings, prompt-reading speed, memory use,
 correctness checks and quirks.
@@ -79,10 +79,10 @@ correctness checks and quirks.
 - **Two big new MoE models nearly match the default on quality, but not on speed.** Inkling-Small and Ling-3.1-flash
   both scored 21 of 25, with every task outside coding right. They took 279 and 744 minutes against Flash-Next's 51.
 - **Coding separates the models.** Only Flash-Next and Qwen3.8-27B solved 4 of the 7 coding tasks. Of the finished
-  runs at their best, only Flash-Next solved the regex engine. Only Inkling and Ling solved the Scheme interpreter, and
-  only Ling and MiMo the JSON parser.
+  runs at their best, only Flash-Next and Nanbeige solved the regex engine. Only Inkling and Ling solved the Scheme
+  interpreter, and only Ling, MiMo and Nanbeige the JSON parser.
 - **Room to think matters.** A 24,000-token budget cut off every coding answer of GLM, Nanbeige and MiMo while they were
-  still working, so their 24K-round scores understate them. Those two reruns are in progress.
+  still working, so their 24K-round scores understate them. With room, Nanbeige went from 9.8 to 18. GLM's rerun is in progress.
 - **Quants.** Flash-Next's IQ3_S and UD-Q4_K_XL scored within one task of each other (22 and 21 with room), and IQ3_S
   writes twice as fast. Nemotron's UD-Q3_K_XL writes 43% faster than UD-Q4_K_XL, and its top token matches Q4's at 97%
   of positions.

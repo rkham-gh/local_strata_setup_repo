@@ -638,8 +638,9 @@ folder.
 budget, and solved one: it was still reasoning, not looping, when the 24K budget cut it off. In the 24K round it looped
 once, repeating one line until its budget ran out.
 
-**Hard test** ([hard-test.md](hard-test.md)): 9.8 of 25 (11.8 counting two print-format slips) in the 24K-budget round.
-A rerun at its best settings is in progress.
+**Hard test** ([hard-test.md](hard-test.md)): 18 of 25 at its best (19 counting a print slip), coding 3 of 7, 412
+minutes, at the card's reasoning settings with top-k and min-p off and a 96K context. In the 24K-budget round it scored
+9.8 (11.8 counting two print-format slips).
 
 ## 7. Gemma 4 26B-A4B and 31B (llama.cpp router)
 
