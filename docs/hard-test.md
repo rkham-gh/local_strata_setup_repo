@@ -1,77 +1,81 @@
-# The hard test
+# Hard test
 
-Most quick checks (tool calls, JSON, short reasoning) are passed by every model here, so they don't separate them. The hard
-test climbs in difficulty until models fail. It has 25 tasks, each generated from a fixed seed, so every model gets
-exactly the same problems, and none could have seen them before. Every answer is scored by code, not by eye.
+25 tasks generated from fixed seeds, so every model gets identical, unseen problems. Code scores every answer.
+Per-task data for every run: [`../results/hard-test-tasks.csv`](../results/hard-test-tasks.csv).
 
-| Group | Tasks | How it's checked |
+| Group | Tasks | Check |
 |---|---|---|
-| Traced programs | trace-1, trace-2, trace-3 | The model works out by hand what a short Python program prints. The line must match exactly, in the final code block |
-| Long multiplication | multiply-8d, -14d, -20d | The exact product of two 8-, 14- and 20-digit numbers, by hand |
-| Logic grids | grid-4x3, -5x4, -6x4 | Puzzles with exactly one solution |
-| Optimization | tour-7, tour-9, knapsack-16 | Shortest 7- and 9-city routes and a 16-item knapsack, compared with exact solvers |
-| Following instructions | follow-acrostic, -lipogram, -words | Constrained writing, checked mechanically |
-| Long input | long-table, long-hops | A 200-row JSON table to transform, and a chain of clues hidden in a 52K-token document |
-| Coding | code-regex, -scheme, -ordered, -diff, -sudoku, -json, -sat | A regex engine, a Scheme interpreter, an ordered multiset, a shortest-edit-script diff, a Sudoku solver, a JSON parser and a SAT solver. Each runs against hidden tests, most with time limits |
-| Repair job (`kitchen`) | 1 | Fix a 7-file project through tool calls (read, write, run tests, finish). Scored by 10 hidden tests |
+| Traces | trace-1, -2, -3 | Exact `print()` output of a short program, in the final code block |
+| Long multiplication | multiply-8d, -14d, -20d | Exact product, by hand |
+| Logic grids | grid-4x3, -5x4, -6x4 | Unique solution |
+| Optimization | tour-7, tour-9, knapsack-16 | Against exact solvers |
+| Constrained writing | follow-acrostic, -lipogram, -words | Mechanical checks |
+| Long input | long-table, long-hops | A 200-row JSON transform; a clue chain across a 52K-token document |
+| Coding | code-regex, -scheme, -ordered, -diff, -sudoku, -json, -sat | Hidden tests, most with time limits. The JSON parser must match `json.loads` exactly and reject its extensions (`NaN`, `Infinity`) |
+| Repair | kitchen | A 7-file project fixed through tools (read, write, run tests, `finish`), 24 turns at most, 10 hidden tests |
 
 **Scoring.**
-- **Strict:** one point a task, with the repair job counting as its share of the 10 hidden tests (8 of 10 is 0.8).
-- **Lenient:** also counts a traced program whose values are all right but printed differently from `print()`, such as
-  commas between arguments or `''` for an empty string. Tables mark those `ok*`.
-- **Markers:** `len` means the answer ran out of the token budget or the context. `loop` means the loop guard ended an
-  answer that kept repeating itself.
-- Neither `len` nor `loop` scores. A `len` shows the budget was too small, not that the model can't do the task.
+- **Strict:** 1 point a task, and the repair job counts as its share of the 10 hidden tests.
+- **Lenient:** additionally counts a trace whose values are all right but formatted unlike `print()` (`ok*`): commas
+  between arguments, or `''` for an empty string.
+- **`len`:** the budget or the context ran out.
+- **`loop`:** `--loop-guard` ended the answer, when its last 20,000 characters compressed more than 15x with zlib.
+  Observed loops compress 44-465x and real answers at most 7.7x.
+- **Timed code answers keep their first verdict.** Too-slow answers were re-timed afterwards for information only. The
+  Maya-based engines sit at 0% CPU between requests, so serving doesn't slow the test code.
 
-## Two rounds
+## Settings
 
-1. **The 24K round, 2026-11-02.** Every model had a 24,000-token budget per request, at temperature 0.6 and top-p 0.95.
-   - The engines' own thinking caps applied. Strata ends Flash-Next's thinking at three quarters of `max_tokens`, so its
-     thinking stopped at 18K on 10 tasks. Project Maya closes thinking at 32,768 tokens.
-   - About half of the slower models' tasks hit the 24K cap while still thinking.
-2. **At their best, 2026-11-03 to 2026-11-06.** Each model ran at its model card's sampling and highest reasoning
-   effort, with as much output room as it can use on this PC.
-   - Engine thinking caps were off. Maya's run configs had `"thinking_budget": 0` and `"fit_max_tokens": true` for that
-     start only.
-   - `--loop-guard` was on.
-   - `--tool-thinking` was on wherever the chat template keeps earlier thinking in a tool loop. With it, the repair
-     job's assistant turns go back with their `reasoning_content`.
+**24K round (2026-11-02):** a 24,000-token budget per request, temperature 0.6, top-p 0.95, and the engines' own
+thinking caps on. Strata ends thinking at 3/4 of `max_tokens`, which cut Flash-Next at 18K on 10 tasks. Maya closes
+thinking at 32,768 tokens.
 
-| Model (at its best) | Sampling | Reasoning effort | Output room per answer |
+**At their best (2026-11-03 to 11-07):**
+- each model at its card's sampling and top reasoning effort, with as much output as fits here;
+- engine thinking caps off: Maya run configs got `"thinking_budget": 0, "fit_max_tokens": true` for that start only;
+- `--loop-guard` on, and `--tool-thinking` on wherever the template replays reasoning inside a tool loop;
+- answers that hit the budget (not loops) on GLM and MiMo are re-run with 256K and reported separately, as Flash-Next's
+  were.
+
+| Model | Sampling | Effort | Output room |
 |---|---|---|---|
-| Qwen3.8-Flash-Next IQ3_S, Strata | temperature 0.6, top-p 0.95 | default | 262,144-token budget, trimmed to the context left. Only the 11 tasks Strata's cap cut short were re-run with it; the other 14 never reached the cap |
-| Inkling-Small, maya-ink | 1.0, top-p 1.0 | `max` (0.99, the level its lab evaluated at) | 262,144 budget, stops at the 128K context |
-| Ling-3.1-flash, maya-ling | 1.0, top-p 0.95, top-k 20 | thinks always (no levels) | 262,144 budget, stops at the 128K context |
-| Qwen3.8-27B, llama.cpp | 1.0, top-p 0.95, top-k 20, min-p 0 | `xhigh` (its highest) | 262,144 budget, stops at the 208K context |
-| DeepSeek-V4.1-Flash Coder, Maya | 0.6, top-p 0.95 | `max` | 384,000 (its listed maximum output), 1M context |
-| Gemma 4 26B-A4B and 31B, llama.cpp | 1.0, top-p 0.95, top-k 64 | thinking on (no levels) | 262,144 budget, stops at the 224K context |
-| Nemotron 3.5 Super UD-Q3_K_XL, maya-nem | 1.0, top-p 0.95 | thinking on, full mode | 262,144 budget, stops at the 256K context |
-| Nanbeige4.3-33B, llama.cpp | 0.6, top-p 0.95, top-k and min-p off (the card's reasoning row) | always thinks | 262,144 budget, stops at the 96K context, the most that fits in VRAM with a q8_0 cache |
-| GLM-5.3-Flash Maya-S24 | 1.0, top-p 0.95 | `max` | 131,072 (its listed output limit) in a 256K context |
-
-GLM's run at its best was still in progress when this was written. Its 24K result is below.
+| Qwen3.8-Flash-Next IQ3_S (Strata) | 0.6 / top-p 0.95 | default | 262,144, trimmed to the context left. Only the 11 tasks the 24K round cut short were re-run |
+| Inkling-Small (maya-ink) | 1.0 / 1.0 | `max` (0.99) | to the 128K context. maya-ink has no thinking cap |
+| Ling-3.1-flash (maya-ling) | 1.0 / 0.95 / top-k 20 | always on | to the 128K context |
+| Qwen3.8-27B (llama.cpp) | 1.0 / 0.95 / top-k 20 / min-p 0 | `xhigh` | to the 208K context |
+| DeepSeek-V4.1-Flash Coder (Maya) | 0.6 / 0.95 | `max` | 384,000, its listed maximum, in 1M |
+| Gemma 4 26B-A4B, 31B (llama.cpp) | 1.0 / 0.95 / top-k 64 | on | to the 224K context |
+| Nemotron 3.5 Super UD-Q3_K_XL (maya-nem) | 1.0 / 0.95 | full mode | to the 256K context |
+| Nanbeige4.3-33B (llama.cpp) | 0.6 / 0.95, top-k and min-p off (the card's reasoning row) | always on | to 96K: the most context that fits in VRAM with q8_0 KV |
+| GLM-5.3-Flash Maya-S24 | 1.0 / 0.95, stop on `<\|assistant\|>` | `max` | 131,072, the listed output, in 256K. Capped tasks re-run at 256K |
+| MiMo-V2.6-Flash-RL (strata-mimo, `MIMO_TAIL_KEEP=5`) | 1.0 / 0.95 (the card) | always on | 131,072 in 256K. Capped tasks re-run at 256K |
 
 ## Results at their best
 
-| Model | Score of 25 (strict) | Lenient | Coding, of 7 | Whole test | Tokens written | Average writing speed |
+| Model | Strict | Lenient | Coding | Wall time | Tokens | Avg decode |
 |---|---|---|---|---|---|---|
 | Qwen3.8-Flash-Next IQ3_S | **22** | 22 | 4 | 51 min | 711K | 233 tok/s |
 | Inkling-Small UD-Q4_K_XL | **21** | 21 | 3 | 279 min | 671K | 40 tok/s |
-| Ling-3.1-flash IQ2_XS | **21** | 21 | 3, plus 2 cut off by the 128K context | 744 min | 992K | 22 tok/s |
+| Ling-3.1-flash IQ2_XS | **21** | 21 | 3 (+2 cut off at 128K) | 744 min | 992K | 22 tok/s |
 | Qwen3.8-Flash-Next UD-Q4_K_XL | **21** | 21 | 3 | 92 min | 830K | 150 tok/s |
 | Qwen3.8-27B Q6_K | **20** | 20 | 4 | 130 min | 788K | 101 tok/s |
 | DeepSeek-V4.1-Flash Coder IQ2_XXS | **19** | 19 | 2 | 298 min | 1,132K | 63 tok/s |
 | Gemma 4 26B-A4B Q8_0 | **18** | 18 | 2 | 22 min | 458K | 349 tok/s |
 | Nanbeige4.3-33B Q4_K_M | **18** | 19 | 3 | 412 min | 1,034K | 42 tok/s |
-| Gemma 4 31B QAT 4-bit | **17** | 18 | 1 | 18 min | 201K | 185 tok/s |
-| Nemotron 3.5 Super UD-Q3_K_XL | **17** | 17 (18 counting an answer outside its code block) | 0 | 195 min | 472K | 40 tok/s |
+| Gemma 4 31B QAT | **17** | 18 | 1 | 18 min | 201K | 185 tok/s |
+| Nemotron 3.5 Super UD-Q3_K_XL | **17** | 17 (18 with trace-3's line outside the block) | 0 | 195 min | 472K | 40 tok/s |
+| GLM-5.3-Flash Maya-S24 | running | | | | | |
+| MiMo-V2.6-Flash-RL | queued | | | | | |
 
-The writing speeds are averages over whole answers, including the time spent reading prompts. They can differ from the
-short-prompt speeds in `models.md`. Long answers on engines with an adaptive VRAM expert cache run faster than new short
-prompts do (Inkling 40 against 30 tok/s), and dense models slow down as an answer grows (Nanbeige 69 tok/s on a new
-prompt, about 39 on its long coding answers).
+Average decode includes prefill time. It isn't the short-prompt decode in the README:
+- **Expert-caching engines get faster on long single-domain answers**, as the cache converges: Inkling 40 tok/s here
+  against 30 on `ab.py`.
+- **Dense models slow down with depth.** Nanbeige writes 69 tok/s on a new prompt and about 39 on its long coding
+  answers.
+- **Drafting goes faster on long chains of thought.** DeepSeek's Maya engine decoded 55-62 tok/s through the test,
+  against 33-35 on new short prompts.
 
-Per task, at their best. Each cell is the verdict and the tokens written:
+Per task. Each cell is the verdict and the tokens written:
 
 | Task | Flash-Next IQ3_S | Inkling-Small | Ling-3.1-flash | Flash-Next Q4 | Qwen3.8-27B | DeepSeek Coder | Gemma 4 26B | Nanbeige4.3-33B | Gemma 4 31B | Nemotron Q3 |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -104,78 +108,62 @@ Per task, at their best. Each cell is the verdict and the tokens written:
 | Lenient | 22 | 21 | 21 | 21 | 20 | 19 | 18 | 19 | 18 | 17 |
 | Minutes | 51 | 279 | 744 | 92 | 130 | 298 | 22 | 412 | 18 | 195 |
 
-### Notes per model
+Notes:
+- **Flash-Next IQ3_S.**
+  - With room it solved all three routes and knapsack, and the regex engine (99.5K tokens).
+  - Sudoku looped: it recalled a puzzle and wrote zeros until Strata's repeat guard fired.
+  - The Scheme interpreter timed out at 102K, and the JSON parser looped at 24K and wasn't re-run.
+  - UD-Q4_K_XL is within one task at either budget; single tasks flip between runs.
+- **Inkling-Small.** Its Scheme interpreter was the first to pass.
+  - Regex: it calls its own helper with an extra argument. JSON: it rejects `1e400`, over-applying the no-`Infinity`
+    rule to a valid literal that overflows.
+  - Sudoku 19.6 s against a 10 s limit, and SAT past 90 s; both reproduce. The repair job passed 10/10 without ever
+    calling `finish` (all 24 turns).
+- **Ling-3.1-flash.**
+  - It passed JSON, the second run to do so after MiMo, and Scheme.
+  - Diff and Sudoku were still thinking at the 128K context (131K tokens, about 105 min each). It hasn't been run at
+    256K: that would cost about 1.4 GB of VRAM, at 10.4 KB of MLA cache a token.
+  - SAT ended at 126K saying a satisfiable formula is unsat, and regex rejects a valid `?`.
+- **Qwen3.8-27B.** It solved ordered, diff, Sudoku and SAT at 60-109K tokens each.
+  - Regex got 5 cases wrong, Scheme fails a plain `cond`, and JSON looped.
+  - Trace-3 had two wrong values, and the word list looped.
+- **DeepSeek Coder.** The 9-city route took 120K tokens, the diff 186K.
+  - Regex looped to the full 384K before the guard was rebuilt. The first guard looked for exact repeats, and each
+    paragraph carried a new number.
+  - Scheme stopped mid-function, and Sudoku took 32.7 s against a 10 s limit.
+- **Gemma 4.** It solves puzzles cheaply: the 31B did both routes and the knapsack in 10-14K tokens each.
+  - Every coding answer ended on its own at 1.6-24K tokens, so its failures are plain bugs: lazy quantifiers, an
+    undefined Scheme symbol, surrogate pairs, "unsatisfiable" SAT, diffs that don't rebuild their inputs.
+  - The 31B's coding re-run at temperature 0.6 gave 2/7 against 1/7: noise, not the sampling.
+- **Nanbeige4.3-33B.** With room it gained 8 tasks, all of which had run out of budget at 24K.
+  - It solved regex (the second, after Flash-Next with room), JSON and diff.
+  - Scheme raises a `TypeError`, and Sudoku an `IndexError`. SAT ended with a stray `</code>` instead of the closing
+    fence, and still times out without it.
+  - The word list looped again, and long-table had 5 wrong rows (right at 24K).
+  - The 20-digit product took 97K tokens, just inside the context.
+- **Nemotron 3.5 Super.** All non-coding tasks were right, counting trace-3, whose correct line came outside the code
+  block. Every coding answer ended on its own at 9-48K tokens with a bug. One Q3 run can't separate the model from the
+  quant: Q3's top-1 matches Q4's 97.2% of the time.
 
-- **Flash-Next IQ3_S, with room to think.** All three routes and the knapsack were right, and so was the regex engine.
-  - It lost the Sudoku solver to a loop: recalling a puzzle, it wrote zeros until Strata's guard ended the reply.
-  - Its Scheme interpreter timed out after 102K tokens.
-  - The JSON parser looped at 24K and wasn't re-run.
-  - UD-Q4_K_XL scored 21 with room, against 22. Single tasks flip between runs, so the two quants read as even. IQ3_S
-    stays the default because it writes twice as fast.
-- **Inkling-Small.** Every task outside coding was right. Its Scheme interpreter was the first of any run to pass.
-  - The regex engine crashed: it calls one of its own helpers with five arguments where it takes four.
-  - The JSON parser refused `1e400`, a valid number that overflows to infinity, where `json.loads` returns `inf`.
-  - The Sudoku solver took 19.6 s against a 10 s limit, and the SAT solver ran past its 90 s. Both did the same when re-run
-    with nothing else on the machine. The engine uses no CPU between requests, so the code itself is slow.
-  - In the repair job it passed 10 of 10 but never called `finish`, using all 24 turns.
-- **Ling-3.1-flash.** Every task outside coding was right. Its JSON parser is the second of any run to pass, after
-  MiMo's. The Scheme interpreter passed too.
-  - The diff and the Sudoku solver were still thinking when they reached the 128K context, after about 131K tokens and
-    105 minutes each. The model supports 256K, which costs about 1.4 GB more VRAM but wasn't tried.
-  - The SAT solver ended by itself at 126K tokens but calls a satisfiable formula unsatisfiable.
-  - The regex engine rejects a valid `?`.
-  - It thinks long: 35K tokens on the 8-digit product, where Inkling used 9K.
-- **Qwen3.8-27B.** Everything but coding was right except trace-3 (two wrong values) and the word list, which looped
-  until the guard ended it.
-  - Coding was 4 of 7: the ordered multiset, diff, Sudoku and SAT solver, each after 60K-109K tokens.
-  - The regex engine got 5 cases wrong, the Scheme interpreter fails a plain `cond`, and the JSON parser looped.
-- **DeepSeek-V4.1-Flash Coder.** It solved the 9-city route in 120K tokens.
-  - Coding was 2 of 7: the ordered multiset, and the diff after 186K tokens.
-  - The regex answer used all 384K tokens in a loop. The loop guard was rebuilt after this run, because the first
-    version looked for exact repeats and each paragraph carried a new number.
-  - The Scheme interpreter stopped mid-function. The Sudoku solver took 32.7 s against a 10 s limit. The JSON parser and
-    the SAT solver had bugs.
-  - Trace-2 had a wrong value.
-- **Nanbeige4.3-33B.** With room it gained 8 tasks over its 24K run, all of which had run out of budget there: the 14- and
-  20-digit products, both routes, the knapsack and three coding tasks.
-  - Its regex engine passed, which before only Flash-Next with room had managed. Its JSON parser is the third to
-    pass, after MiMo's and Ling's. The diff passed too.
-  - The Scheme interpreter raises a `TypeError`, the ordered multiset fails a check, and the Sudoku solver raises an
-    `IndexError`. The SAT solver's answer ended with a stray `</code>` tag instead of the closing fence; without the
-    tag it still ran past its 90 s limit.
-  - The word list looped, as at 24K. Five rows of the 200-row table were wrong, where at 24K it got the table right.
-  - The 20-digit product took 97K tokens, just inside the 96K context. It wrote at 42 tok/s on average, against 69 on
-    new prompts: a dense model's attention costs more the deeper into an answer it writes.
-- **Gemma 4.** Both solve puzzles with little thinking: the 31B did both routes and the knapsack in 10-14K tokens each.
-  - Coding is where they fall behind. Every coding answer ended by itself at 1.6K-24K tokens, so none was cut short, and
-    the failures were real bugs: lazy quantifiers in the regex engine, an undefined symbol in the Scheme interpreter,
-    surrogate pairs in the JSON parser, SAT solvers that say "unsatisfiable", and diffs that don't rebuild their inputs.
-  - The 26B's regex engine looped.
-  - Google's temperature 1.0 isn't what holds them back. The 31B's coding tasks re-run at 0.6 solved 2 of 7 against 1,
-    within the noise.
-- **Nemotron 3.5 Super.** Outside coding, every answer was right, counting trace-3, whose correct line was given outside
-  the code block the prompt asks for.
-  - Coding was 0 of 7. Every coding answer ended by itself at 9K-48K tokens with a bug in its own code.
-  - One run can't tell the model's coding from the quant's. Q3's top token matches Q4's 97% of the time.
+## 24K round
 
-## The 24K round
-
-Every model at temperature 0.6, top-p 0.95 and a 24,000-token budget per request:
-
-| Group | Flash-Next IQ3_S | Flash-Next UD-Q4_K_XL | GLM-5.3-Flash S24, `high` | Nanbeige4.3-33B | MiMo-V2.6-Flash |
+| Group | Flash-Next IQ3_S | Flash-Next UD-Q4_K_XL | GLM-5.3-Flash S24 `high` | Nanbeige4.3-33B | MiMo-V2.6-Flash |
 |---|---|---|---|---|---|
-| Traced programs (3) | 3 | 3 | 2 | 1 (3 counting two print-format slips) | 3 |
-| Multiplying 8, 14 and 20 digits | 3 | 3 | 1, two out of budget | 1, two out of budget | 1, two out of budget |
+| Traces | 3 | 3 | 2 | 1 (3 lenient) | 3 |
+| Multiplication | 3 | 3 | 1, 2 `len` | 1, 2 `len` | 1, 2 `len` |
 | Logic grids | 3 | 3 | 2 | 3 | 3 |
-| Routes and knapsack | 2 | 2 | 0, two out of budget | 1, two out of budget | 0, all out of budget |
-| Following instructions | 3 | 3 | 2 | 1, one looped | 2, one out of budget |
-| Table and clue chain | 2 | 1, the table out of budget | 2 | 2 | 2 |
-| Coding (7) | 4 | 3 | 0, all out of budget | 0, all out of budget | 1 (of its last 2, run at 128K); 4 out of budget, Sudoku too slow |
-| Repair job | 10 of 10 in 90 s | 10 of 10 in 107 s | 10 of 10 in 139 s | 8 of 10 in 25 s | 9 of 10 in 224 s |
-| **Score of 25** | **21** | **19** | **10** | **9.8 (11.8)** | **12.9** |
+| Routes, knapsack | 2 | 2 | 0, 2 `len` | 1, 2 `len` | 0, all `len` |
+| Constrained writing | 3 | 3 | 2 | 1, 1 loop | 2, 1 `len` |
+| Long input | 2 | 1, table `len` | 2 | 2 | 2 |
+| Coding | 4 | 3 | 0, all `len` | 0, all `len` | 1 (JSON at 128K); 4 `len`, Sudoku too slow |
+| Repair | 10/10, 90 s | 10/10, 107 s | 10/10, 139 s | 8/10, 25 s | 9/10, 224 s |
+| **Score** | **21** | **19** | **10** | **9.8 (11.8)** | **12.9** |
 | Time | 24 min | 34 min | 145 min | 109 min | 259 min |
 
-Per task, 24K round:
+MiMo's last three tasks (JSON, SAT, repair) ran at 128K. Partial coding re-runs with room before the at-best round:
+- **GLM, 128K, no thinking cap:** 0 of 3. It never converged on two of them (57-59 min each), re-deciding and drafting
+  code inside its thinking.
+- **Nanbeige, 96K:** 1 of 3 (the diff, 62K tokens).
 
 | Task | Flash-Next IQ3_S | Flash-Next Q4 | MiMo | GLM S24 | Nanbeige |
 |---|---|---|---|---|---|
@@ -208,65 +196,40 @@ Per task, 24K round:
 | Lenient | 21 | 19 | 12.9 | 10 | 11.8 |
 | Minutes | 24 | 34 | 259 | 145 | 109 |
 
-- GLM and Nanbeige ran out of budget on every coding task. Three of those tasks re-ran with as much room as each could
-  get:
-  - GLM, with no thinking cap and 128K of output, solved none of the three. It never converged on two of them (57-59
-    minutes each): it keeps re-deciding and drafting code inside its thinking.
-  - Nanbeige, at 96K, ended all three by itself and solved the diff, after 62K tokens.
-  - MiMo's last three tasks ran at 128K. It solved the JSON parser in 46K tokens, and its SAT solver returned a wrong
-    assignment after 96K.
-
-## Method notes
-
-These rules each come from a wrong result during this testing:
-
-- **A budget cut isn't a failure.** A low cap once made GLM look as if it couldn't solve a coding task it could. That's
-  why the at-their-best round exists.
-- **Loop guard.** `--loop-guard` ends an answer when its last 20,000 characters compress more than 15 times with zlib.
-  Every loop seen compressed 44-465 times, every real answer at most 7.7. Without it, one looping answer ran to 384K
-  tokens.
-- **Timed code answers keep their first verdict**, because a second run is a different measurement. Too-slow answers were
-  re-timed for information only. The VRAM-expert-cache engines use no CPU between requests (measured), so they don't
-  slow the tests' code.
-- **Check the checker.** Three checker bugs were found and fixed along the way:
-  - An import ban applied to every coding task instead of only where the prompt rules a module out.
-  - The code-block extraction kept an unclosed fence.
-  - The knapsack check rejected a list inside a one-key object.
-  - Re-scoring the saved answers changed none of the earlier verdicts. Every wrong answer was also checked by hand.
-- **Treat one run as an example.** Single tasks flip between runs, as the two routes did for Flash-Next's two quants at
-  24K. Differences of one task are within the noise.
-
 ## Raw data
 
-`../results/hard-test-tasks.csv` has one row per run and task, holding the last row per task as the scorer reads it:
+`results/hard-test-tasks.csv` columns:
 
-| Column | What it holds |
+| Column | Holds |
 |---|---|
-| `verdict` | `ok`, `ok*` (print-format slip), `x`, `len`, `loop`, or `n/10` for the repair job |
-| `strict_point`, `lenient_point` | The points scored on each scale |
-| `finish` | The engine's finish reason, or `loop` |
+| `run`, `task`, `group` | The run label, the task and its group |
+| `verdict` | `ok` / `ok*` / `x` / `len` / `loop` / `n/10` |
+| `strict_point`, `lenient_point` | The points on each scale |
+| `finish` | The engine's finish reason |
 | `tokens` | Tokens written |
-| `seconds` | Wall time, including prompt reading |
-| `rescored` | Whether the row came from a later checker fix |
+| `seconds` | Wall time, prefill included |
+| `rescored` | Set when the row came from a later checker fix |
 
-Answer texts and error output aren't included. Run labels:
+There's one row per run and task: the last one, as the scorer reads them. Answer texts aren't included.
 
 | Label | Run |
 |---|---|
 | `flash-next`, `flash-next-q4` | Flash-Next IQ3_S and UD-Q4_K_XL, 24K round |
-| `flash-next-max`, `flash-next-q4-max` | The 11 tasks Strata's cap cut short, re-run at 262K |
-| `glm` | GLM-5.3-Flash S24 at `high`, 24K round |
-| `glm-max`, `glm-64k` | GLM coding re-runs: 3 tasks at 128K with no thinking cap, 2 at 64K |
-| `nanbeige` | Nanbeige, 24K round |
-| `nanbeige-max` | Nanbeige's 3 coding re-runs at 96K |
-| `nanbeige-best` | Nanbeige at its best |
-| `nanbeige-best-llamacpp-defaults` | The first 4 tasks of that run with llama.cpp's default top-k 40 / min-p 0.05, stopped and restarted with them off |
-| `mimo` | MiMo, 24K round |
-| `mimo-max` | MiMo's last 3 tasks at 128K |
-| `deepseek-max` | DeepSeek Coder at max settings |
-| `ds-coder-60k` | Its coding at 60K |
-| `deepseek-max-token-only` | A 2-task side check |
-| `qwen27b-max` | Qwen3.8-27B at its best |
-| `gemma26b-q8-max`, `gemma31b-max` | Gemma 4 at its best |
+| `flash-next-max`, `flash-next-q4-max` | Their 11 capped tasks re-run at 262K |
+| `glm` | GLM S24 `high`, 24K round |
+| `glm-max`, `glm-64k` | Coding re-runs: 3 tasks at 128K with no cap, 2 at 64K |
+| `glm-best` | GLM at its best (running) |
+| `nanbeige`, `nanbeige-max` | 24K round, and 3 coding re-runs at 96K |
+| `nanbeige-best` | At its best |
+| `nanbeige-best-llamacpp-defaults` | The first 4 tasks of that run with llama.cpp's default top-k 40 / min-p 0.05, stopped and restarted with both off. Same verdicts, with the print slip moved from trace-2 to trace-1 |
+| `mimo`, `mimo-max` | 24K round, and the last 3 tasks at 128K |
+| `deepseek-max`, `ds-coder-60k`, `deepseek-max-token-only` | At max settings, its coding at 60K, and a 2-task side check |
+| `qwen27b-max`, `gemma26b-q8-max`, `gemma31b-max`, `nemotron-q3-max`, `inkling-max`, `ling-max` | At their best |
 | `gemma31b-max-code-t06` | The 31B's coding at temperature 0.6 |
-| `nemotron-q3-max`, `inkling-max`, `ling-max` | Those models at their best |
+
+Checker fixes along the way:
+- An import ban was applied to every coding task, not only where the prompt forbids a module.
+- Code-block extraction kept an unclosed fence.
+- The knapsack check refused a list inside a one-key object.
+
+Re-scoring changed no earlier verdict, and every wrong answer was also checked by hand.

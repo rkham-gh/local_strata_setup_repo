@@ -189,6 +189,15 @@ glm,code-sat,code,len,0,0,length,24000,671.7,False
 glm,kitchen,repair,10/10,1.0,1.0,,4658,138.6,False
 glm-64k,code-ordered,code,x,0,0,stop,36297,968.6,False
 glm-64k,code-diff,code,x,0,0,stop,37085,993.5,False
+glm-best,trace-1,trace,ok,1,1,stop,2505,62.8,False
+glm-best,trace-2,trace,ok,1,1,stop,11162,271.5,False
+glm-best,trace-3,trace,ok,1,1,stop,13662,335.2,False
+glm-best,multiply-8d,multiply,ok,1,1,stop,22720,523.5,False
+glm-best,multiply-14d,multiply,len,0,0,length,131072,3084.8,False
+glm-best,multiply-20d,multiply,len,0,0,length,131072,3134.8,False
+glm-best,grid-4x3,logic,ok,1,1,stop,4119,102.7,False
+glm-best,grid-5x4,logic,ok,1,1,stop,5158,124.2,False
+glm-best,grid-6x4,logic,ok,1,1,stop,39488,975.1,False
 glm-max,code-ordered,code,len,0,0,length,128000,3439.5,False
 glm-max,code-diff,code,len,0,0,length,128000,3516.3,False
 glm-max,code-sat,code,x,0,0,stop,127522,3504.5,False
