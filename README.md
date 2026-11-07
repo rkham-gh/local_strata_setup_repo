@@ -1,97 +1,103 @@
-# Large LLMs on one workstation: setups, speeds and a hard test
+# Local inference benchmarks: Strata, Project Maya, llama.cpp
 
-Measured notes on running twelve large language models locally on one PC, from 27B dense models to 564B
-mixtures of experts. They cover how each one is served, how fast it writes and reads, and how well it does on a 25-task
-hard test at its best settings. All numbers were measured on this machine between 2026-10-29 and 2026-11-06.
+Optimized setups (Strata, Project Maya, Maya-based custom engines, tuned llama.cpp presets) against an unoptimized
+baseline, mostly stock llama.cpp, on one RTX 5090 + 192 GB box. Plus a 25-task hard test at each model's own settings.
+Measured 2026-10-29 to 2026-11-06.
 
-## The machine
+## System
 
-| Part | Spec |
+| | |
 |---|---|
-| CPU | AMD Ryzen 9 9950X, 16 cores / 32 threads |
-| Motherboard | ASUS ProArt X870E-Creator WiFi |
-| GPU | NVIDIA GeForce RTX 5090 Founders Edition, 32 GB GDDR7, 450 W power limit, driver 617.42 |
-| GPU link | PCIe 5.0 running at x8, not x16: the NVMe drive's M.2 slot shares the GPU's lanes. 28.7 GB/s measured host to GPU from pinned memory |
-| RAM | 192 GB DDR5: 2 x 32 GB + 2 x 64 GB, rated 5600 MT/s, running at 3600 MT/s, AMD's supported speed for four dual-rank DIMMs. Each engine's CPU lane reaches about 37-50 GB/s reading experts |
-| Storage | One 2 TB NVMe SSD |
-| OS | Windows 11 Pro (build 26300) |
-| Software | CUDA 13.4; llama.cpp build 12017; Strata 0.2.10 (engine 0.1.56); Project Maya v1.1.52 |
+| CPU | Ryzen 9 9950X (16C/32T) |
+| Board | ASUS ProArt X870E-Creator WiFi |
+| GPU | RTX 5090 FE 32 GB, 450 W limit, driver 617.42 |
+| PCIe | Gen5 **x8** (lanes shared with the M.2 slot), 28.7 GB/s H2D pinned |
+| RAM | 192 GB DDR5 (2x32 + 2x64), rated 5600, **running 3600 MT/s**. The CPU expert lanes see 37-50 GB/s |
+| OS / stack | Windows 11 Pro 26300, CUDA 13.4, llama.cpp b12017, Strata 0.2.10 (engine 0.1.56), Project Maya v1.1.52 |
 
-**What sets the speeds here:**
-- **RAM bandwidth.** The big mixture-of-experts models keep most of their experts in system RAM and read them for every
-  token, so their writing speed follows RAM bandwidth.
-- **The PCIe link.** Long prompts move experts to the GPU in chunks, so prompt-reading speed follows the PCIe link.
-- **The 32 GB of VRAM.** It decides how many experts can be cached on the GPU.
-- **Faster hardware would raise these numbers.** RAM at its rated 5600 MT/s, or the GPU at x16, would make the
-  RAM-bound and PCIe-bound numbers higher than shown.
+The big MoEs here are RAM-bandwidth-bound on decode and PCIe-bound on prefill, so expect higher numbers on DDR5-5600+
+and x16.
 
-Only one engine runs at a time: each needs the whole GPU and most of the RAM. A PowerShell switcher (`switch-model.ps1`)
-stops one engine and starts another, and won't stop a server that answered a request in the last 5 minutes.
+## Throughput: baseline vs optimized
 
-## The engines
+`ab.py` (greedy, thinking off): decode on six unseen prompts, prefill and TTFT on an unseen ~33K-token prompt. Runs on
+expert-caching engines start from the same saved expert profile, 3+ runs each. Rows marked † are decode with thinking on
+at the model's own sampling (`spec-sweep.py`), where drafting matters.
 
-| Engine | What it is | Models here |
-|---|---|---|
-| Strata | Inference engine for large MoE models: VRAM expert cache, speculative drafting (DFlash2) | Qwen3.8-Flash-Next |
-| Project Maya | A Strata fork with GLM and DeepSeek engines | GLM-5.3-Flash, DeepSeek-V4.1-Flash Coder |
-| strata-mimo | A Strata fork for MiMo, with local fixes | MiMo-V2.6-Flash-RL |
-| maya-ink, maya-nem, maya-ling | Engines written for this PC in a Project Maya fork, one branch each (`inkling`, `nemotron`, `ling`). They use the same design: chunked prompt reading on the GPU, a VRAM expert cache running beside a CPU lane, CUDA graphs | Inkling-Small, Nemotron 3.5 Super, Ling-3.1-flash |
-| llama.cpp router | `llama-server` in router mode with per-model presets | Qwen3.8-27B, Nanbeige4.3-33B, Gemma 4 26B and 31B, Nemotron with pictures |
-
-## The models at a glance
-
-Writing speed is on new prompts, from short chats measured with `ab.py` (greedy, thinking off) unless marked. The hard
-test is at each model's best settings; see `docs/hard-test.md`.
-
-| Model | Engine | Quant | Context | Writing, new prompts | Hard test, of 25 |
+| Model, quant | Setup | Decode tok/s | Decode after 33K | Prefill tok/s | TTFT at 33K |
 |---|---|---|---|---|---|
-| Qwen3.8-Flash-Next | Strata | ISTA-DASLab IQ3_S | 256K | 225-229 tok/s | **22** (coding 4/7) |
-| Inkling-Small (276B, 12B active) | maya-ink | Unsloth UD-Q4_K_XL, 163 GB | 128K | 30-31 tok/s | **21** (3/7) |
-| Ling-3.1-flash (564B, 25B active) | maya-ling | bartowski IQ2_XS, 177 GB | 128K | 22-23 tok/s | **21** (3/7, 2 cut off at 128K) |
-| Qwen3.8-27B (dense) | llama.cpp | Q6_K | 208K | 128 tok/s; 99 with thinking at its sampling | **20** (4/7) |
-| DeepSeek-V4.1-Flash Coder | Project Maya | ISTA IQ2_XXS | 1M | 33-35 tok/s | **19** (2/7) |
-| Gemma 4 26B-A4B | llama.cpp, MTP drafter | Q8_0 | 224K | 311 tok/s with thinking at its sampling | **18** (2/7) |
-| Gemma 4 31B (dense) | llama.cpp, MTP drafter | Google QAT 4-bit (UD-Q4_K_XL) | 224K | 170 tok/s with thinking at its sampling | **17** (1/7) |
-| Nemotron 3.5 Super VL (120B, 12B active) | maya-nem | Unsloth UD-Q3_K_XL, 65.8 GB | 256K | ~41 tok/s | **17** (0/7) |
-| MiMo-V2.6-Flash-RL | strata-mimo | MXFP4 | 256K | 21-26 tok/s | 12.9 in the 24K round |
-| GLM-5.3-Flash | Project Maya, Maya-S24 | Maya pack with expert skips | 256K | 36-38 tok/s (23 on the exact Maya-M) | 10 in the 24K round; rerun at its best in progress |
-| Nanbeige4.3-33B (dense) | llama.cpp | Q4_K_M, 20.8 GB | 80K (96K for the test) | 66-69 tok/s **18** (3/7) at its best, with 96K context; 9.8 in the 24K round |
+| **Qwen3.8-Flash-Next** UD-Q4_K_XL | llama.cpp router (no drafting) | 28 | | ~480 | |
+| | Strata 0.2.10, same quant, DFlash2 | 116 | | | |
+| IQ3_S (ISTA-DASLab) | Strata 0.1.54, plain | 190 | 190 | 5,320 | |
+| | **Strata 0.2.10, DFlash2 + `adapt-every=1 adapt-swaps=80 adapt-decay=0.97`** | **225-229** | 201-217 | ~5,700 | |
+| **Inkling-Small** UD-Q4_K_XL | llama.cpp PR #25731, `--cpu-moe` | 9.1 | 9.6 | 72 | 441 s |
+| | llama.cpp PR #25731, 14 GB expert cache, `-ub 2048` | 9.0 | 9.7 | 207 | 154 s |
+| | **maya-ink** | **30.2** | 26.3 | 794 | 40 s |
+| **Nemotron 3.5 Super** UD-Q4_K_XL | llama.cpp, `--cpu-moe` | 11.2 | 11.4 | 107 | 319 s |
+| | llama.cpp, own fit, `-ub 2048` | 13.0 | 13.5 | 474 | 72 s |
+| | **maya-nem** | **26.3** | 21.7 | 1,607 | 21 s |
+| UD-Q3_K_XL | maya-nem | 37.7 | 30.6 | 1,981 | 17 s |
+| | **maya-nem + AVX2 Q2_0 rows** | **41.3** | 34.1 | 1,973 | 17 s |
+| **Ling-3.1-flash** IQ2_XS | llama.cpp, `--cpu-moe` | 12.0 | 12.5 | 75.6 | 470 s |
+| | llama.cpp, own fit | 12.0 | 12.8 | 86.5 | 410 s |
+| | **maya-ling, 16K chunks, `LING_PF_PREFETCH=1`** | **22.4** | 16.2 | 876 | 41 s |
+| **DeepSeek-V4.1-Flash Coder** IQ2_XXS | llama.cpp, own `--fit`, 16K | 21.7 | | | |
+| | llama.cpp, `--cpu-moe` + 22 GB `moe-cache`, q8_0 KV, 64K | 29.8 | 29.7 | 472 | |
+| | Strata 0.2.10, 256K | 30.0-33.8 | 27.8-29.0 | 1,526-2,483 | |
+| | **Project Maya (ds4 engine), 1M** | **33.5-34.8** | 30.9 | 3,200-3,357 | |
+| **GLM-5.3-Flash** | Project Maya, Maya-M (exact) | 22.8 | | ~2,650 | |
+| | **Project Maya, Maya-S24 with expert skips (KL 0.052)** | **38.4** | 36.6 | 2,948 | |
+| **MiMo-V2.6-Flash-RL** MXFP4 | strata-mimo `268fdbc`, stock | 14.9 | | ~950 | |
+| | **strata-mimo + local fixes + `MIMO_TAIL_KEEP=5` (KL 0.037)** | **25.5** | 21 | ~1,030 | |
+| **Qwen3.8-27B** Q6_K † | llama.cpp, no drafting | 64 | | | |
+| | **llama.cpp, MTP, 2 drafts** | **99** | | 2,630 | |
+| **Gemma 4 31B** QAT Q4 † | llama.cpp, no drafter | 72 | | | |
+| | **llama.cpp, MTP drafter, 4 drafts** | **170** | 104 at 38K | ~2,550 | |
+| **Gemma 4 26B-A4B** Q8_0 † | llama.cpp, no drafter | 202 | | | |
+| | **llama.cpp, MTP drafter** | **311** | 222 at 38K | ~8,000 | |
+| **Nanbeige4.3-33B** Q4_K_M | llama.cpp, q8_0 KV, 80K (`ngram-mod` ~1% on new text, 14x on repeats) | 69 | 38 at 39K | ~2,050 | |
 
-`docs/models.md` has each model's architecture, quant choice, engine settings, prompt-reading speed, memory use,
-correctness checks and quirks.
+Engine notes:
+- **maya-ink, maya-nem, maya-ling** are engines in a Project Maya fork (branches `inkling`, `nemotron`, `ling`). They
+  share one design:
+  - layer-at-a-time chunked prefill (8-16K tokens, one PCIe crossing per expert per chunk, own pinned staging);
+  - an adaptive VRAM expert cache (decay 0.99/token, 16 swaps every 2 tokens) running beside a CPU expert lane;
+  - per-layer CUDA graphs.
+- About 65-80% of each token is still the CPU lane at RAM speed.
+- MTP on maya-nem was exact, but 22-31% slower than without it. Each drafted token still reads its own experts from
+  RAM, and the head takes about 4 GB of the expert cache.
+- Below about 32 GB of VRAM in use everything holds. Above it, the driver pages VRAM to system RAM and throughput
+  collapses (for example, llama.cpp `-ngl 99` without `--cpu-moe` on Nemotron: 3 tok/s).
 
-## What we found
+## Hard test
 
-- **Qwen3.8-Flash-Next on Strata is the best all-rounder here.** It has the top hard-test score, 22 of 25, and writes
-  225-229 tok/s. It finishes the whole test in 51 minutes, where models of similar score take 5-15 times as long.
-- **Mixtures of experts too big for VRAM are bound by RAM bandwidth.**
-  - Each token reads its routed experts that aren't cached in VRAM from system RAM, at about 40-50 GB/s on this
-    DDR5-3600.
-  - On Inkling, Nemotron and Ling, that CPU share is 65-80% of each token's time. Writing speed follows how many
-    experts fit in VRAM and how many bytes each expert is, not the file size.
-  - More of the experts in VRAM, or faster RAM, is the lever.
-- **Engines built for this hardware beat llama.cpp's best setups by about 2-3x on writing and 3-10x on prompt reading**
-  for the big MoE models on the same files. Inkling writes 30 tok/s against 9, Nemotron's UD-Q4_K_XL 26 against 13, and
-  Ling 22 against 12. Ling reads prompts at 876 tok/s against 87. The design:
-  - prompts read on the GPU in chunks of 8-16K tokens, so each expert crosses PCIe once a chunk;
-  - an adaptive VRAM expert cache running at the same time as a CPU lane;
-  - CUDA graphs for each layer.
-- **Two big new MoE models nearly match the default on quality, but not on speed.** Inkling-Small and Ling-3.1-flash
-  both scored 21 of 25, with every task outside coding right. They took 279 and 744 minutes against Flash-Next's 51.
-- **Coding separates the models.** Only Flash-Next and Qwen3.8-27B solved 4 of the 7 coding tasks. Of the finished
-  runs at their best, only Flash-Next and Nanbeige solved the regex engine. Only Inkling and Ling solved the Scheme
-  interpreter, and only Ling, MiMo and Nanbeige the JSON parser.
-- **Room to think matters.** A 24,000-token budget cut off every coding answer of GLM, Nanbeige and MiMo while they were
-  still working, so their 24K-round scores understate them. With room, Nanbeige went from 9.8 to 18. GLM's rerun is in progress.
-- **Quants.** Flash-Next's IQ3_S and UD-Q4_K_XL scored within one task of each other (22 and 21 with room), and IQ3_S
-  writes twice as fast. Nemotron's UD-Q3_K_XL writes 43% faster than UD-Q4_K_XL, and its top token matches Q4's at 97%
-  of positions.
+25 seeded tasks (traces, long multiplication, logic grids, routing and knapsack, constrained writing, a 200-row table, a
+52K-token retrieval chain, 7 programs against hidden tests, a 7-file tool-driven repair). Each model ran at its card's
+sampling and top reasoning effort, with thinking caps off and as much output as the box allows. Details and per-task
+results: [`docs/hard-test.md`](docs/hard-test.md).
 
-## Documents
+| Model | Score /25 | Coding /7 | Wall time | Tokens | Avg decode |
+|---|---|---|---|---|---|
+| Qwen3.8-Flash-Next IQ3_S | 22 | 4 | 51 min | 711K | 233 tok/s |
+| Inkling-Small UD-Q4_K_XL | 21 | 3 | 279 min | 671K | 40 tok/s |
+| Ling-3.1-flash IQ2_XS | 21 (2 cut off at 128K ctx) | 3 | 744 min | 992K | 22 tok/s |
+| Qwen3.8-Flash-Next UD-Q4_K_XL | 21 | 3 | 92 min | 830K | 150 tok/s |
+| Qwen3.8-27B Q6_K | 20 | 4 | 130 min | 788K | 101 tok/s |
+| DeepSeek-V4.1-Flash Coder IQ2_XXS | 19 | 2 | 298 min | 1,132K | 63 tok/s |
+| Gemma 4 26B-A4B Q8_0 | 18 | 2 | 22 min | 458K | 349 tok/s |
+| Nanbeige4.3-33B Q4_K_M (96K ctx) | 18 (19 lenient) | 3 | 412 min | 1,034K | 42 tok/s |
+| Gemma 4 31B QAT | 17 (18 lenient) | 1 | 18 min | 201K | 185 tok/s |
+| Nemotron 3.5 Super UD-Q3_K_XL | 17 (18 lenient) | 0 | 195 min | 472K | 40 tok/s |
+| GLM-5.3-Flash Maya-S24 | running (10 at a 24K budget) | | | | |
+| MiMo-V2.6-Flash-RL | queued (12.9 at a 24K budget) | | | | |
 
-| File | Contents |
+At a flat 24K budget, GLM, Nanbeige and MiMo ran out on every coding task. With room, Nanbeige went from 9.8 to 18.
+
+## Files
+
+| | |
 |---|---|
-| `docs/models.md` | One section per model: specs, quant, engine settings, measured speeds, memory, correctness, quirks |
-| `docs/hard-test.md` | The hard test: tasks, scoring, the settings each model ran at, per-task results and notes |
-| `docs/measuring.md` | How the speeds and correctness were measured, and the rules that came from wrong results |
-| `results/hard-test-tasks.csv` | Every hard-test run's per-task verdicts, tokens and times |
+| [`docs/models.md`](docs/models.md) | Per model: architecture, quant choice, launch settings, env, speeds, memory, correctness vs llama.cpp, quirks |
+| [`docs/hard-test.md`](docs/hard-test.md) | Tasks, scoring, each model's settings, per-task matrix, failure notes |
+| [`docs/measuring.md`](docs/measuring.md) | Measurement method and pitfalls |
+| [`results/hard-test-tasks.csv`](results/hard-test-tasks.csv) | Per-task verdicts, tokens and times for every run |
