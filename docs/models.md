@@ -5,8 +5,9 @@ memory use, correctness checks, settings and quirks. Every speed was measured on
 lab, a quant publisher or an engine's own docs are marked as theirs. [measuring.md](measuring.md) describes the methods,
 and [hard-test.md](hard-test.md) has the hard-test results that each section sums up in one line.
 
-**Hardware:** AMD Ryzen 9 9950X (16 cores), NVIDIA RTX 5090 32 GB on PCIe 5.0 running at x8 (about 29 GB/s), 192 GB
-DDR5 running at 3600 MT/s (four DIMMs), Windows 11.
+**Hardware:** AMD Ryzen 9 9950X (16 cores), NVIDIA RTX 5090 32 GB (450 W limit) on PCIe 5.0 running at x8 (28.7 GB/s
+measured), 192 GB DDR5 rated 5600 but running at 3600 MT/s (four DIMMs), Windows 11 Pro. The README has the full table,
+and what each part means for the speeds.
 
 Only one engine runs at a time: each one needs the GPU and most of the RAM. `switch-model.ps1` stops the running server
 before it starts the next. Qwen3.8-Flash-Next on Strata is the default.

@@ -8,11 +8,22 @@ hard test at its best settings. All numbers were measured on this machine betwee
 
 | Part | Spec |
 |---|---|
-| CPU | AMD Ryzen 9 9950X, 16 cores |
-| GPU | NVIDIA RTX 5090, 32 GB, on PCIe 5.0 at x8 (about 29 GB/s) |
-| RAM | 192 GB DDR5 in four DIMMs, running at 3600 MT/s |
+| CPU | AMD Ryzen 9 9950X, 16 cores / 32 threads |
+| Motherboard | ASUS ProArt X870E-Creator WiFi |
+| GPU | NVIDIA GeForce RTX 5090 Founders Edition, 32 GB GDDR7, 450 W power limit, driver 617.42 |
+| GPU link | PCIe 5.0 running at x8, not x16: the NVMe drive's M.2 slot shares the GPU's lanes. 28.7 GB/s measured host to GPU from pinned memory |
+| RAM | 192 GB DDR5: 2 x 32 GB + 2 x 64 GB, rated 5600 MT/s, running at 3600 MT/s, AMD's supported speed for four dual-rank DIMMs. Each engine's CPU lane reaches about 37-50 GB/s reading experts |
 | Storage | One 2 TB NVMe SSD |
-| OS | Windows 11 Pro |
+| OS | Windows 11 Pro (build 26300) |
+| Software | CUDA 13.4; llama.cpp build 12017; Strata 0.2.10 (engine 0.1.56); Project Maya v1.1.52 |
+
+**What sets the speeds here:**
+- **RAM bandwidth.** The big mixture-of-experts models keep most of their experts in system RAM and read them for every
+  token, so their writing speed follows RAM bandwidth.
+- **The PCIe link.** Long prompts move experts to the GPU in chunks, so prompt-reading speed follows the PCIe link.
+- **The 32 GB of VRAM.** It decides how many experts can be cached on the GPU.
+- **Faster hardware would raise these numbers.** RAM at its rated 5600 MT/s, or the GPU at x16, would make the
+  RAM-bound and PCIe-bound numbers higher than shown.
 
 Only one engine runs at a time: each needs the whole GPU and most of the RAM. A PowerShell switcher (`switch-model.ps1`)
 stops one engine and starts another, and won't stop a server that answered a request in the last 5 minutes.
