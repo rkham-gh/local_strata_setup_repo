@@ -98,11 +98,30 @@ results: [`docs/hard-test.md`](docs/hard-test.md).
 - **GLM effort:** GLM at `max` thinks past any budget; 10 of its 25 answers hit 131K. `high` and `low` with 262K solved five of those, plus the repair job, so for hard work use `high`, not GLM's default.
 - **MiMo checkpoints:** MiMo's MOPD checkpoint scores the same as RL, but codes better: 3 of 7 against 1. It runs at the same speed and writes 19% fewer tokens.
 
+How each model lost its points. Per miss, with patterns across models: [`docs/failure-modes.md`](docs/failure-modes.md).
+
+| Model | Misses | Mostly |
+|---|---|---|
+| Flash-Next IQ3_S | 3 | Runs of zeros that Strata's repeat guard stops early; one slow program |
+| Inkling-Small | 4 | Code only: two too slow, two bugs |
+| Ling-3.1-flash | 4 | Code only: two still thinking at the 128K context, two bugs |
+| Flash-Next UD-Q4_K_XL | 4 | Code only: bugs, a slow program, a loop |
+| Qwen3.8-27B | 5 | Two loops, two coding bugs, a trace slip |
+| DeepSeek Coder | 6 | Coding bugs, a counting loop to 384K, an answer that stops mid-function |
+| Gemma 4 26B-A4B | 7 | Short coding answers with plain bugs; slips in long output (a dropped digit, a 6-letter word) |
+| Nanbeige4.3-33B | 7 | Coding bugs, a word-list loop, 35 wrong rows in the long table, format slips |
+| Gemma 4 31B | 8 | Coding bugs at ~8K tokens an answer; estimated the 20-digit product instead of multiplying |
+| Nemotron 3.5 Super Q3 | 8 | Every coding answer ends early, with a bug or a slow algorithm |
+| MiMo MOPD | 9 | Careless short answers (traces, a word count, a primality check), coding bugs |
+| MiMo RL | 9 | Runs out of room enumerating by hand (3), coding bugs |
+| GLM-5.3-Flash `max` | 12 | Runs out of room (10 of 25); the repair job stalls |
+
 ## Files
 
 | | |
 |---|---|
 | [`docs/models.md`](docs/models.md) | Per model: architecture, quant choice, launch settings, env, speeds, memory, correctness vs llama.cpp, quirks |
-| [`docs/hard-test.md`](docs/hard-test.md) | Tasks, scoring, each model's settings, per-task matrix, failure notes |
+| [`docs/hard-test.md`](docs/hard-test.md) | Tasks, scoring, each model's settings, per-task matrix |
+| [`docs/failure-modes.md`](docs/failure-modes.md) | Every miss by type and cause, patterns across models, tool use in the repair job, the 24K budget |
 | [`docs/measuring.md`](docs/measuring.md) | Measurement method and pitfalls |
 | [`results/hard-test-tasks.csv`](results/hard-test-tasks.csv) | Per-task verdicts, tokens and times for every run |

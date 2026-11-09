@@ -2,7 +2,7 @@
 
 Per-model setup, settings, speeds, checks and quirks. All speeds were measured on this PC; figures from a model's lab, a
 quant publisher or an engine's docs are marked as theirs. System specs and the baseline-vs-optimized summary:
-[`../README.md`](../README.md). Methods: [measuring.md](measuring.md). Hard-test details: [hard-test.md](hard-test.md).
+[`../README.md`](../README.md). Methods: [measuring.md](measuring.md). Hard-test details: [hard-test.md](hard-test.md); misses by type: [failure-modes.md](failure-modes.md).
 
 One engine runs at a time, since each needs the GPU and most of the RAM; `switch-model.ps1` stops the running server
 before starting the next. Default: Qwen3.8-Flash-Next on Strata.
@@ -179,7 +179,7 @@ this PC matches the IQ3_S figure, and the Q4 gap fits the slower RAM and link. H
 (19 at the 24K budget), 92 minutes; single tasks flipped between runs, so one run each reads as even with IQ3_S, not
 worse.
 
-**Hard test** ([hard-test.md](hard-test.md)): IQ3_S 22 of 25 with room to think (21 at the 24K budget), coding 4 of 7,
+**Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): IQ3_S 22 of 25 with room to think (21 at the 24K budget), coding 4 of 7,
 51 minutes.
 
 ## 2. GLM-5.3-Flash (Project Maya)
@@ -269,7 +269,7 @@ after it had reversed both words correctly. The JSON task passes since v1.1.50. 
   through it is refused here, because `switch-model.ps1` starts the server directly. The page-file warning at start is
   harmless.
 
-**Hard test** ([hard-test.md](hard-test.md)): 13 of 25 at its card's sampling, `max` effort and 131K (10 answers ran to
+**Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): 13 of 25 at its card's sampling, `max` effort and 131K (10 answers ran to
 the budget, still thinking); 18.9 taking each task's best of re-runs at `high` and `low` with 262K. For hard work, send
 `reasoning_effort: "high"`: the default `max` thinks past any budget. 10 of 25 in the 24K-budget round at `high`.
 
@@ -360,7 +360,7 @@ spaces), tools 5/5, the 3 coding tasks at `high` in 22-189 s, the agent bug-fix 
 - A cold file cache costs speed: one baseline read 11.7 tok/s on its first run and 14.9 on the second. Disk reads should
   stay at 0 MB/s during answers; if they don't, something else is taking the RAM.
 
-**Hard test** ([hard-test.md](hard-test.md)): RL 16 of 25 at its best (card sampling, thinking on, 131K), coding 1 of 7,
+**Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): RL 16 of 25 at its best (card sampling, thinking on, 131K), coding 1 of 7,
 580 min; 12.9 in the 24K-budget round. 
 
 **The MOPD checkpoint (in use since 2026-11-08).** Xiaomi's vLLM recipe says the RL checkpoint can get stuck
@@ -460,7 +460,7 @@ character: always set `max_tokens` and check `finish_reason`. The loops are the 
 it, at temperature 0.6 and 1.0. DRY sampling (`dry_multiplier 0.8`) cut the runs to 28 zeros, but the answers still
 failed, so sampling stays at the defaults.
 
-**Hard test** ([hard-test.md](hard-test.md)): 19 of 25 at max settings (effort `max`, a 384,000-token budget, Maya's
+**Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): 19 of 25 at max settings (effort `max`, a 384,000-token budget, Maya's
 thinking cap off), coding 2 of 7, 298 minutes.
 
 ## 5. Qwen3.8-27B (llama.cpp router)
@@ -512,7 +512,7 @@ On build 12000 at 128K: 65 tok/s plain and 107 with MTP on short prompts, 57 (at
 - Hard tasks took it 60K-109K tokens of thinking at ~100 tok/s; allow 20 minutes or more a task.
 - The whole model and its context sit in VRAM: the strongest choice here when RAM has to stay free.
 
-**Hard test** ([hard-test.md](hard-test.md)): 20 of 25, coding 4 of 7, 130 minutes.
+**Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): 20 of 25, coding 4 of 7, 130 minutes.
 
 ## 6. Nanbeige4.3-33B (llama.cpp router)
 
@@ -561,7 +561,7 @@ once, repeating one line until its budget ran out.
 - `response_format` and `tool_choice: "required"` fail at once with HTTP 400 (`Failed to initialize samplers`) on
   build 12017. Ask for JSON in the prompt instead.
 
-**Hard test** ([hard-test.md](hard-test.md)): 18 of 25 at its best (19 counting a print slip), coding 3 of 7,
+**Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): 18 of 25 at its best (19 counting a print slip), coding 3 of 7,
 412 minutes, at the card's reasoning settings with top-k and min-p off and a 96K context. In the 24K-budget round it
 scored 9.8 (11.8 counting two print-format slips).
 
@@ -629,7 +629,7 @@ calculator ran out of the test's 6K and 8K caps; its agent task took 18 s. Both 
 - Gemma solves puzzles with little thinking: the 31B did both routes and the knapsack in 10-14K tokens each. Its coding
   failures are real bugs, not budget: every coding answer ended by itself after 1.6K-24K tokens.
 
-**Hard test** ([hard-test.md](hard-test.md)): 26B-A4B 18 of 25, coding 2 of 7, 22 minutes. 31B 17 of 25 (18 counting a
+**Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): 26B-A4B 18 of 25, coding 2 of 7, 22 minutes. 31B 17 of 25 (18 counting a
 print slip), coding 1 of 7, 18 minutes.
 
 ## 8. Inkling-Small (maya-ink)
@@ -724,7 +724,7 @@ version.
 - After a change in the fork, rebuild with `build-maya-ink.bat`; `make_pack.py` rewrites the tokenizer folder from the
   GGUF.
 
-**Hard test** ([hard-test.md](hard-test.md)): 21 of 25 at reasoning effort `max`, coding 3 of 7, 279 minutes.
+**Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): 21 of 25 at reasoning effort `max`, coding 3 of 7, 279 minutes.
 
 ## 9. Nemotron 3.5 Super VL (maya-nem)
 
@@ -833,7 +833,7 @@ top-p 0.95, min-p 0. It decodes 13.0 tok/s on new prompts and 13.5 after a 34K p
 30.3 GB of VRAM at 256K. Leave its fit alone: given `-ngl 99` without `--cpu-moe`, llama.cpp put the whole model "on"
 the GPU, filled 32.0 GB, spilled the rest to shared memory and decoded 3.0 tok/s.
 
-**Hard test** ([hard-test.md](hard-test.md)): UD-Q3_K_XL 17 of 25 (18 counting an answer given outside its code block),
+**Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): UD-Q3_K_XL 17 of 25 (18 counting an answer given outside its code block),
 coding 0 of 7, 195 minutes. UD-Q4_K_XL hasn't run it.
 
 ## 10. Ling-3.1-flash (maya-ling)
@@ -923,5 +923,5 @@ layer at Q4_0 (4.6 GB, not loaded).
 drafting, and 256K context. 256K would take ~1.4 GB more VRAM than 128K, and would have given the hard test's two
 cut-off coding answers room.
 
-**Hard test** ([hard-test.md](hard-test.md)): 21 of 25, coding 3 of 7, 744 minutes. Two more coding answers were still
+**Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): 21 of 25, coding 3 of 7, 744 minutes. Two more coding answers were still
 thinking when they reached the 128K context.

@@ -126,49 +126,9 @@ GLM's attempts on the 11 tasks it re-ran (`-`: not re-run at that level):
 | kitchen | 0/10 (stopped) | 9/10 | - | 9/10 |
 | **Score (best per task)** | **13** | | | **18.9** |
 
-Notes:
-- **Flash-Next IQ3_S.**
-  - With room it solved all three routes and knapsack, and the regex engine (99.5K tokens).
-  - Sudoku looped: it recalled a puzzle and wrote zeros until Strata's repeat guard fired.
-  - The Scheme interpreter timed out at 102K, and the JSON parser looped at 24K and wasn't re-run.
-  - UD-Q4_K_XL is within one task at either budget; single tasks flip between runs.
-- **Inkling-Small.** Its Scheme interpreter was the first to pass.
-  - Regex: it calls its own helper with an extra argument. JSON: it rejects `1e400`, over-applying the no-`Infinity`
-    rule to a valid literal that overflows.
-  - Sudoku 19.6 s against a 10 s limit, and SAT past 90 s; both reproduce. The repair job passed 10/10 without ever
-    calling `finish` (all 24 turns).
-- **Ling-3.1-flash.**
-  - It passed JSON, the second run to do so after MiMo, and Scheme.
-  - Diff and Sudoku were still thinking at the 128K context (131K tokens, about 105 min each). It hasn't been run at
-    256K: that would cost about 1.4 GB of VRAM, at 10.4 KB of MLA cache a token.
-  - SAT ended at 126K saying a satisfiable formula is unsat, and regex rejects a valid `?`.
-- **Qwen3.8-27B.** It solved ordered, diff, Sudoku and SAT at 60-109K tokens each.
-  - Regex got 5 cases wrong, Scheme fails a plain `cond`, and JSON looped.
-  - Trace-3 had two wrong values, and the word list looped.
-- **DeepSeek Coder.** The 9-city route took 120K tokens, the diff 186K.
-  - Regex looped to the full 384K before the guard was rebuilt. The first guard looked for exact repeats, and each
-    paragraph carried a new number.
-  - Scheme stopped mid-function, and Sudoku took 32.7 s against a 10 s limit.
-- **Gemma 4.** It solves puzzles cheaply: the 31B did both routes and the knapsack in 10-14K tokens each.
-  - Every coding answer ended on its own at 1.6-24K tokens, so its failures are plain bugs: lazy quantifiers, an
-    undefined Scheme symbol, surrogate pairs, "unsatisfiable" SAT, diffs that don't rebuild their inputs.
-  - The 31B's coding re-run at temperature 0.6 gave 2/7 against 1/7: noise, not the sampling.
-- **Nanbeige4.3-33B.** With room it gained 8 tasks, all of which had run out of budget at 24K.
-  - It solved regex (the second, after Flash-Next with room), JSON and diff.
-  - Scheme raises a `TypeError`, and Sudoku an `IndexError`. SAT ended with a stray `</code>` instead of the closing
-    fence, and still times out without it.
-  - The word list looped again, and long-table had 5 wrong rows (right at 24K).
-  - The 20-digit product took 97K tokens, just inside the context.
-- **Nemotron 3.5 Super.** All non-coding tasks were right, counting trace-3, whose correct line came outside the code
-  block. Every coding answer ended on its own at 9-48K tokens with a bug. One Q3 run can't separate the model from the
-  quant: Q3's top-1 matches Q4's 97.2% of the time.
-- **GLM-5.3-Flash (Maya-S24).** At `max` it rarely converges: 10 of its 25 answers ran to the 131K budget still thinking, and the repair job spent two 131K turns thinking without one tool call, so it was stopped and scored as the unchanged project, 0/10. Re-run with 262K at `high`, it solved both big products, the regex engine (210K tokens) and the repair job, 9/10 in 7 turns. At `low` it solved the knapsack (70K, where `high` found the optimum at 251K but wrapped it in an object with extra keys) and the Scheme interpreter in only 14K tokens. `low` also stopped the ordered multiset after 2K tokens with an `AttributeError`. tour-9 hit 262K at both `high` and `low`. Planned `max` re-runs of diff, Sudoku and SAT, which failed with room left at `high`, were skipped. Taking each task's best result gives 18.9, from up to three attempts per task (table below).
-- **MiMo-V2.6-Flash RL and MOPD.** They share a strict score of 16 but differ on the coding:
-  - MOPD solved 3 coding tasks: regex, ordered and diff. RL solved only ordered, and ran out of budget on the diff and the knapsack, which MOPD solved.
-  - RL got trace-3, the acrostic and the whole 200-row table, all of which MOPD missed. MOPD lost only one row of the table.
-  - MOPD wrote 19% fewer tokens and finished almost 2 hours sooner, at the same decode speed.
-  - Both passed the repair job 10/10, with no tool-call loops, despite Xiaomi's warning about the RL checkpoint.
-  - MOPD's tour-9 re-run at 256K was cancelled, so it stands at the 131K `len`.
+How each model lost its points, by type (loops, running out of room, format slips, bugs, slow code), with each miss's
+cause, patterns across models, tool use in the repair job and behaviour under the 24K budget:
+[failure-modes.md](failure-modes.md).
 
 ## 24K round
 
