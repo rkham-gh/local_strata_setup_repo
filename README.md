@@ -49,6 +49,7 @@ at the model's own sampling (`spec-sweep.py`), where drafting matters.
 | | **Project Maya, Maya-S24 with expert skips (KL 0.052)** | **38.4** | 36.6 | 2,948 | |
 | **MiMo-V2.6-Flash-RL** MXFP4 | strata-mimo `268fdbc`, stock | 14.9 | | ~950 | |
 | | **strata-mimo + local fixes + `MIMO_TAIL_KEEP=5` (KL 0.037)** | **25.5** | 21 | ~1,030 | |
+| **MiMo-V2.6-Flash-MOPD** MXFP4 | strata-mimo, same setup as RL | **25.7** | 21.1 | 1,034 | 32 s |
 | **Qwen3.8-27B** Q6_K † | llama.cpp, no drafting | 64 | | | |
 | | **llama.cpp, MTP, 2 drafts** | **99** | | 2,630 | |
 | **Gemma 4 31B** QAT Q4 † | llama.cpp, no drafter | 72 | | | |
@@ -88,10 +89,14 @@ results: [`docs/hard-test.md`](docs/hard-test.md).
 | Nanbeige4.3-33B Q4_K_M (96K ctx) | 18 (19 lenient) | 3 | 412 min | 1,034K | 42 tok/s |
 | Gemma 4 31B QAT | 17 (18 lenient) | 1 | 18 min | 201K | 185 tok/s |
 | Nemotron 3.5 Super UD-Q3_K_XL | 17 (18 lenient) | 0 | 195 min | 472K | 40 tok/s |
-| GLM-5.3-Flash Maya-S24 | running (10 at a 24K budget) | | | | |
-| MiMo-V2.6-Flash-RL | queued (12.9 at a 24K budget) | | | | |
+| MiMo-V2.6-Flash-MOPD MXFP4 | 16 (17 lenient) | 3 | 465 min | 890K | 32 tok/s |
+| MiMo-V2.6-Flash-RL MXFP4 | 16 | 1 | 580 min | 1,098K | 32 tok/s |
+| GLM-5.3-Flash Maya-S24, `max`, 131K | 13 | 0 | 782 min | 1,840K | 39 tok/s |
+| GLM-5.3-Flash, best per task over `max` / `high` / `low` re-runs | 18.9 | 2 | +17 h | | |
 
-At a flat 24K budget, GLM, Nanbeige and MiMo ran out on every coding task. With room, Nanbeige went from 9.8 to 18.
+- **Budget:** at a flat 24K budget, GLM, Nanbeige and MiMo ran out on every coding task. With room, Nanbeige went from 9.8 to 18, and MiMo from 12.9 to 16.
+- **GLM effort:** GLM at `max` thinks past any budget; 10 of its 25 answers hit 131K. `high` and `low` with 262K solved five of those, plus the repair job, so for hard work use `high`, not GLM's default.
+- **MiMo checkpoints:** MiMo's MOPD checkpoint scores the same as RL, but codes better: 3 of 7 against 1. It runs at the same speed and writes 19% fewer tokens.
 
 ## Files
 

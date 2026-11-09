@@ -17,7 +17,7 @@ recorded.
 | Qwen3.8-Flash-Next (default) | — | ISTA-DASLab IQ3_S, 84 GB | Strata 0.2.10 | 256K | 225-229 tok/s | ~5,700 tok/s | 85-88 GB |
 | GLM-5.3-Flash | — | Maya-S24, 94.7 GB | Project Maya v1.1.52 | 256K | 38.4 tok/s | 2,948 tok/s | 74 GB |
 | GLM-5.3-Flash, exact | — | Maya-M, 116 GB | Project Maya v1.1.52 | 256K | 22.8 tok/s | ~2,650 tok/s | 92-94 GB |
-| MiMo-V2.6-Flash-RL | — | MXFP4, 170 GB | strata-mimo, patched | 256K | 25.5 tok/s | ~1,030 tok/s | grows to ~157 GB |
+| MiMo-V2.6-Flash-MOPD (RL before 2026-11-08) | — | MXFP4, 170 GB | strata-mimo, patched | 256K | 25.7 tok/s (RL 25.5) | ~1,030 tok/s | grows to ~157 GB |
 | DeepSeek-V4.1-Flash Coder | 552B base, half its routed experts removed | ISTA-DASLab IQ2_XXS, 72.1 GB + 110.6 GB Engram table | Project Maya's DeepSeek engine | 1M | 33.5 tok/s | 3,200-3,300 tok/s | ~43 GB of pinned experts; total — |
 | DeepSeek Coder, fallback | as above | as above | llama.cpp router | 64K | 29.8 tok/s | 472 tok/s | — |
 | Qwen3.8-27B | 27B, dense | Unsloth UD-Q6_K, 22 GB + 1.4 GB MTP head | llama.cpp router | 208K | 128 tok/s | 2,630 tok/s | a few GB |
@@ -269,8 +269,9 @@ after it had reversed both words correctly. The JSON task passes since v1.1.50. 
   through it is refused here, because `switch-model.ps1` starts the server directly. The page-file warning at start is
   harmless.
 
-**Hard test** ([hard-test.md](hard-test.md)): 10 of 25 in the 24K-budget round at `high`. A rerun at its best settings
-is in progress.
+**Hard test** ([hard-test.md](hard-test.md)): 13 of 25 at its card's sampling, `max` effort and 131K (10 answers ran to
+the budget, still thinking); 18.9 taking each task's best of re-runs at `high` and `low` with 262K. For hard work, send
+`reasoning_effort: "high"`: the default `max` thinks past any budget. 10 of 25 in the 24K-budget round at `high`.
 
 ## 3. MiMo-V2.6-Flash-RL (strata-mimo)
 
@@ -359,8 +360,16 @@ spaces), tools 5/5, the 3 coding tasks at `high` in 22-189 s, the agent bug-fix 
 - A cold file cache costs speed: one baseline read 11.7 tok/s on its first run and 14.9 on the second. Disk reads should
   stay at 0 MB/s during answers; if they don't, something else is taking the RAM.
 
-**Hard test** ([hard-test.md](hard-test.md)): 12.9 of 25 in the 24K-budget round, with its last two coding tasks and the
-repair job run at 128K. A run at its best settings is queued.
+**Hard test** ([hard-test.md](hard-test.md)): RL 16 of 25 at its best (card sampling, thinking on, 131K), coding 1 of 7,
+580 min; 12.9 in the 24K-budget round. 
+
+**The MOPD checkpoint (in use since 2026-11-08).** Xiaomi's vLLM recipe says the RL checkpoint can get stuck
+re-issuing tool calls and recommends MiMo-V2.6-Flash-MOPD instead. ggml-org's MOPD GGUF has the RL GGUF's exact layout
+(MXFP4 167.4 GB + an MTP head) and a byte-identical chat template, so it drops into the same strata-mimo config. Only
+the paths and the model ID (`mimo-v2.6-flash-mopd`) change. Its speed is RL's: `ab.py` 25.7 tok/s new prompts, 21.1
+after 33K, prefill 1,034 tok/s. `derail.py` gave 0/20. Hard test at RL's settings: **16 of 25 (17 lenient), coding 3 of 7**
+(regex, ordered, diff), in 465 min and 890K tokens, against RL's 1,098K. The RL checkpoint's files were deleted after
+its run.
 
 ## 4. DeepSeek-V4.1-Flash Coder (Project Maya's DeepSeek engine)
 
