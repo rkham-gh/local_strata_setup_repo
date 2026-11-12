@@ -23,6 +23,14 @@ over decode time, prefill is prompt tokens over prompt time, both from the serve
 Drafting gains (MTP, DFlash2, n-gram) shrink at temperature 1, so `ab.py`'s greedy numbers overstate them. The rows
 marked † in the README come from this script.
 
+## Agent turns: `turns.py`
+
+`ab.py`'s TTFT is for a 20-token prompt and for one long one; neither is what an agent waits for. `turns.py` runs one
+conversation that grows by a tool result of about 220, 330, 850, 1,350, 3,700 and 10,200 tokens (greedy, thinking off,
+150 tokens an answer) and records each turn's first-token time. `--switch` then opens a second conversation and
+returns to the first. It showed strata-mimo waiting ~10 s on every turn of 128 or more new tokens, and Maya's DeepSeek
+engine sending 300-1,400-token turns through its slower prompt path ([two-gpu.md](two-gpu.md)).
+
 ## Correctness
 
 - **Against llama.cpp:** for maya-ink, maya-nem and maya-ling, the same token ids went to both, with greedy top-1
@@ -54,3 +62,10 @@ marked † in the README come from this script.
   switch stayed on for two later runs and made two settings look identical.
 - **Extra CUDA devices visible to a process can change timings on the first one.** maya-ling's prefetch copier ran 38%
   slower with a second card merely visible. For a one-card baseline set `CUDA_VISIBLE_DEVICES`.
+- **Greedy isn't always reproducible.** Maya's DeepSeek engine writes a different greedy answer on every run of one
+  setup, and code answers draft at 90-115 tok/s where prose runs at 40-60. Single `ab.py` runs spread 55-70; compare
+  several.
+- **A pinned copy changes what is cold.** Copying 108 GiB of a model's experts into pinned RAM pushed the rest of the
+  file out of the cache; a benchmark that started with a short turn then measured the SSD.
+- **An expert profile that hasn't seen a drafter picks the wrong drafter experts.** Prompts the profile never saw
+  (`ab-heldout.py`) are the fair test of a setting that depends on the profile.

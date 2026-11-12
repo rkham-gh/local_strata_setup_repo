@@ -17,8 +17,8 @@ recorded.
 | Qwen3.8-Flash-Next (default) | — | ISTA-DASLab IQ3_S, 84 GB | Strata 0.2.10 | 256K | 225-229 tok/s | ~5,700 tok/s | 85-88 GB |
 | GLM-5.3-Flash | — | Maya-S24, 94.7 GB | Project Maya v1.1.52 | 256K | 38.4 tok/s | 2,948 tok/s | 74 GB |
 | GLM-5.3-Flash, exact | — | Maya-M, 116 GB | Project Maya v1.1.52 | 256K | 22.8 tok/s | ~2,650 tok/s | 92-94 GB |
-| MiMo-V2.6-Flash-MOPD (RL before 2026-11-08) | — | MXFP4, 170 GB | strata-mimo, patched | 256K | 25.7 tok/s (RL 25.5) | ~1,030 tok/s | grows to ~157 GB |
-| DeepSeek-V4.1-Flash Coder | 552B base, half its routed experts removed | ISTA-DASLab IQ2_XXS, 72.1 GB + 110.6 GB Engram table | Project Maya's DeepSeek engine | 1M | 33.5 tok/s | 3,200-3,300 tok/s | ~43 GB of pinned experts; total — |
+| MiMo-V2.6-Flash-MOPD (RL before 2026-11-08) | — | MXFP4, 170 GB | strata-mimo, patched | 256K | 25.7 tok/s (RL 25.5) | ~1,030 tok/s (2,810 on both cards since 2026-11-12) | grows to ~157 GB (~170 GB with the pinned copy) |
+| DeepSeek-V4.1-Flash Coder | 552B base, half its routed experts removed | ISTA-DASLab IQ2_XXS, 72.1 GB + 110.6 GB Engram table | Project Maya's DeepSeek engine | 1M | 33.5 tok/s (66 on both cards since 2026-11-12) | 3,200-3,300 tok/s | ~43 GB of pinned experts; total — |
 | DeepSeek Coder, fallback | as above | as above | llama.cpp router | 64K | 29.8 tok/s | 472 tok/s | — |
 | Qwen3.8-27B | 27B, dense | Unsloth UD-Q6_K, 22 GB + 1.4 GB MTP head | llama.cpp router | 208K | 128 tok/s | 2,630 tok/s | a few GB |
 | Nanbeige4.3-33B | 33B, dense | bartowski Q4_K_M, 20.8 GB | llama.cpp router | 80K (96K for its hard-test runs) | 69 tok/s | ~2,050 tok/s | little: all in VRAM |
@@ -35,6 +35,10 @@ Flash-Next's UD-Q4_K_XL was measured, then deleted; its numbers are in section 1
 Everything in this file is on the RTX 5090 alone. Since 2026-11-11 an RTX 3090 sits beside it, and MiMo, Inkling,
 Nemotron and Ling run with it as a helper card: 36.0, 36.6, 48.2 and 24.7 tok/s on new prompts. The one-card vs
 two-card tables for every engine are in [two-gpu.md](two-gpu.md).
+
+Since 2026-11-12 DeepSeek uses both cards as well (Maya's expert helper and DeepSeek's drafter, 66 tok/s: section 4),
+and MiMo's prompt path was reworked (prefill 2.7x, an agent turn's first token after 3.5-5 s instead of 10: section
+3). Both are detailed in [two-gpu.md](two-gpu.md).
 
 ## Engines
 
@@ -303,7 +307,8 @@ with `pinned RAM for the experts: out of memory`. With `--ram-copy 0` it reads t
 disk reads stay at 0 MB/s during answers once the cache is warm. The fork's setup rewrites this config, so both settings
 go back in after any setup run; its `setup.py` also shares the installed Strata's `settings.json`, and given a new data
 folder it moves the other engines' `models`, `packs` and `mtp` folders into it. Run its setup with the settings folder
-pointed at a private directory.
+pointed at a private directory. Since 2026-11-12 a local change pins as many layers as the commit limit allows, and
+the config runs `--ram-copy 1` ("Prompt path" below).
 
 **Local changes** (`strata-mimo-local.patch`):
 
@@ -336,6 +341,7 @@ ones, so the skip covers every layer.
 
 - TTFT: any prompt of 128 or more new tokens waits 5-13 s, so an agent turn costs ~10 s before it writes anything.
   Slower expert copies without the pinned copy are the likely cause; the pinned mode can't run here to confirm it.
+  (2026-11-12: confirmed, and down to 3.5-5 s. "Prompt path" below.)
 - `deep-test.py`: TTFT 171-259 s at ~125K tokens (the slow end on a cold file cache), 171 s at 150K, 232 s at 200K,
   298 s at 250K; decode 26, 24, 24 and 24; every hidden note found.
 - The KV cache sits in VRAM: 256K costs 2.2 GB of VRAM and 10% of the expert slots against 64K, for 5% less decode
@@ -378,6 +384,16 @@ after 33K, prefill 1,034 tok/s. `derail.py` gave 0/20. Hard test at RL's setting
 (regex, ordered, diff), in 465 min and 890K tokens, against RL's 1,098K. The RL checkpoint's files were deleted after
 its run.
 
+**Prompt path, 2026-11-12 (in use, both cards).** Config: `--ram-copy 1`, `MIMO_PREFILL_CPU=4096`,
+`MIMO_PREFILL_SLICE=32768`, `MIMO_TAIL_KEEP=5`, on a local build of the engine. The engine pins as many expert layers
+as the commit limit allows (34 of 47, 108 GiB) instead of failing on all 47; the CPU lane computes a short prompt's
+rarely picked experts instead of having each copied to the card; prompts go in 32K slices; the helper card's refill
+after a long prompt runs on its own thread. `ab.py`: 34-36 tok/s on new prompts and 27-29 after the 33K prompt, as
+before; prefill 2,810 tok/s (the 32.7K prompt in 11.9 s, from 31.7). `turns.py`: an agent turn's first token after
+3.5-4.9 s for 230-1,350 new tokens and 6.5-8.7 s for 3.7-10K, from 9.7-15.1. The start takes 1.8-2.4 minutes instead of
+17-20 s. `derail.py` 0/20, tools 5/5, facts 8/8, reasoning 7/8. Steps, limits and what was left out:
+[two-gpu.md](two-gpu.md) and [pinned-memory.md](pinned-memory.md).
+
 ## 4. DeepSeek-V4.1-Flash Coder (Project Maya's DeepSeek engine)
 
 ISTA-DASLab's DeepSeek-V4.1-Flash-1017 GSQ-RCO Coder: DeepSeek's 552B model with half of each layer's 384 experts
@@ -388,11 +404,11 @@ score and 98.7% of its LiveCodeBench v6.
 |---|---|
 | Architecture | MoE, 192 of 384 routed experts kept per layer, 7,680 in all. Compressed attention keeps the KV cache small. An Engram n-gram table comes with the weights. Text only: the config runs with `--vision off` |
 | Quant | ISTA-DASLab IQ2_XXS, revision `54229d3`: 72.1 GB of weights in five shards, plus the 110.6 GB Engram table as shard 6. `get-coder.py` downloads them and checks each SHA-256 |
-| Engine | Project Maya v1.1.52, DeepSeek engine `maya-ds4`, with a local server change |
+| Engine | Project Maya v1.1.52, DeepSeek engine `maya-ds4`, with a local server change. Since 2026-11-12 a two-card build of v1.1.60's `maya-ds4` from a fork branch (`ds4-2gpu`: two fixes so its expert helper answers on Windows) |
 | Launch | `switch-model.ps1 deepseek` (config `maya-ds4-coder.json`). Port 8083, model ID `deepseek-v4.1-flash-coder` |
 | Context | 1M |
 | VRAM, RAM | ~31 GB, flat across context sizes. The ~43 GB of experts not in VRAM are copied into pinned RAM at start; the KV cache also sits in RAM |
-| Experts in VRAM | 2,600-2,700 of 7,680; a healthy start logs ~2,640 on its `ds4: CUDA0 layers` line |
+| Experts in VRAM | 2,600-2,700 of 7,680; a healthy start logs ~2,640 on its `ds4: CUDA0 layers` line. On both cards: ~2,450 of 8,064 (the count includes the drafter's 384) and ~2,410 on the 3090 |
 | Thinking | Default effort 50 (`low`). `reasoning_effort` takes `low` (50), `high` (75), `max` (100), or a number from 1 to 100. Maya's server budget applies unless the config turns it off, as the max-settings hard-test run did |
 | Works | Tools, `tool_choice: "required"`, `response_format` |
 | Fallback | The llama.cpp router's `deepseek-v4.1-flash-coder` preset, 64K context |
@@ -414,7 +430,8 @@ carries the change to each new release and reports a conflict if it can't.
 - Prefill computes the RAM-resident experts in place instead of copying them over PCIe, hence 6-7 times llama.cpp's
   prefill speed; decode is ~12% faster too.
 - The context costs almost nothing: Maya keeps DeepSeek's cache in RAM, and the compressed attention keeps it small.
-- No drafting: Maya's 8 GB DSpark drafter is built for the full 384-expert model.
+- No drafting until 2026-11-12: Maya's packer refuses its 8 GB DSpark drafter for the pruned model. The drafter
+  itself works on it ("Both cards and the drafter" below).
 - Restart once after each Maya update. The pack's `lane-times.txt` is keyed by the engine's build time, so the first
   start after a new build re-times the PCIe link and starts on a decode path that streams some RAM experts over PCIe:
   1,345 experts in VRAM instead of 2,644, 32.0 tok/s on new prompts and 35.6 on repeats. That run times both paths,
@@ -441,6 +458,17 @@ prefill 3,199-3,230 tok/s on the 33K prompt. Long prompts: decode 40-45 tok/s at
 3,300-4,300 tok/s, every hidden note recalled up to 250K. Strata 0.1.54 couldn't run the Coder: its setup accepts only
 the files it pins.
 
+**Both cards and the drafter (2026-11-12, in use).** Config: the fork's two-card `maya-ds4`, `--gpus 0`, `--dspark on`,
+a second pack folder that also indexes the DSpark drafter's GGUF in place, and `MAYA_DS4_HELPER=1`,
+`MAYA_DS4_HELPER_GB=21`, `MAYA_DS4_WARM_CAP_GB=50`, `DS4_STREAM=0`, `MAYA_DS4_PROMPT_PICK=length:384`,
+`DS4_FLOW_COPY_DMA=1`, `MAYA_DS4_DRAFT_VRAM=32`, `MAYA_DS4_SLOT_KEEP=1`. The 5090 runs every layer, the 3090 holds
+~2,410 routed experts, and the drafter keeps 32 of each block's 128 experts in VRAM. `ab.py`: 66 tok/s on new prompts
+(code 90-115, prose 40-60; single runs 55-70), 60-65 after the 33K prompt, 109-115 on a repeated prompt, prefill
+3,120-3,165 tok/s; 61-63 on prompts the profile never saw, against 22.7 on one card. Back to an earlier 17K-token
+conversation in 0.3 s (`MAYA_DS4_SLOT_KEEP`; it writes kept conversations, tokens included, to the pack's `slots`
+folder). After a Maya update the fork branch has to be rebased and rebuilt; the one-card config on Maya's own build
+stays as the fallback. Steps, fixes and what was left out: [two-gpu.md](two-gpu.md).
+
 **llama.cpp fallback preset:** `n-gpu-layers = all`, `cpu-moe = true`, `moe-cache-mib = 22000`, 64K context, q8_0 K and
 V cache, `ubatch-size = 2048`, `parallel = 1`, `reasoning = on`, and `reasoning-effort = 50`, the effort ISTA's scores
 used.
@@ -458,6 +486,8 @@ used.
   out of the test's 8,000 tokens). Facts 7 of 8: it named neodymium for atomic number 74, as on llama.cpp. Reasoning
   8 of 8, though the checker missed one answer written as `\frac{1}{11}`. At effort `max`, 4 of 4 answers arrived in
   `content` (`max-effort-check.py`), so the local change works.
+- On both cards with the drafter (2026-11-12): `derail.py` 0/20, tools 5/5, facts 8/8 and 7/8, reasoning 7/8 twice
+  (the `\frac{1}{11}` answer again), 4 of 4 at effort `max`.
 - Through the router: tools 5/5 including `tool_choice: "required"`, facts 7 of 8 (the eighth cut off at an 800-token
   cap), reasoning 8 of 8, long-prompt recall right at 8K and 32K, all three thinking levels right.
 

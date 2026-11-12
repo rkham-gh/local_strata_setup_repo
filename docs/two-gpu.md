@@ -13,18 +13,20 @@ noted.
 |---|---|---|---|---|
 | Qwen3.8-Flash-Next IQ3_S | Strata 0.2.10 | **227** | 193 | Strata's layer split. Every token crosses to the 3090 and back |
 | GLM-5.3-Flash Maya-S24 | Project Maya v1.1.52 | 36-38 | **52.6** | Maya's layer split; MTP drafting comes on with two cards |
-| DeepSeek-V4.1-Flash Coder IQ2_XXS | Maya (ds4) | 33.1 | **47.5** | Maya's layer split |
+| DeepSeek-V4.1-Flash Coder IQ2_XXS | Maya (ds4) | 33.1 | 47.5 | Maya's layer split |
+| | Maya (ds4), fork build | 36.5 | **66** | Maya's expert helper + DeepSeek's DSpark drafter (2026-11-12, below) |
 | MiniMax-M3.1-Flash Maya-S | Maya (mm3) | 12.7 | **16.9** | Maya's layer split |
 | Nemotron 3.5 Super UD-Q3_K_XL | llama.cpp b12017 | 19.4 | 23.0 | llama.cpp's device split |
 | | maya-nem | 41.0 | **48.2** | Helper card |
 | Inkling-Small UD-Q4_K_XL | maya-ink | 29.6 | **36.6** | Helper card |
 | Ling-3.1-flash IQ2_XS | maya-ling | 21.2 | **24.7** | Helper card |
-| MiMo-V2.6-Flash-MOPD MXFP4 | strata-mimo, patched | 24.5 | **36.0** | Helper card |
+| MiMo-V2.6-Flash-MOPD MXFP4 | strata-mimo, patched | 24.5 | **36.0** | Helper card. Prefill 2.7x faster since 2026-11-12 (below) |
 
 - **Flash-Next gets slower.** It already fits the 5090 well enough to decode 227 tok/s. Strata's Windows build has
   only the layer split (the all-cards split engine is Linux-only), and a split at layer 44 was worse still (158).
 - **Maya's layer split trades prefill for decode.** GLM and DeepSeek read prompts 40-47% slower on two cards. DeepSeek's
-  first start on two cards decoded 40.1; the second 47.5.
+  first start on two cards decoded 40.1; the second 47.5. Since 2026-11-12 DeepSeek runs on Maya's expert helper
+  instead, which keeps its prefill (below).
 - **MiniMax** reads prompts at ~150 tok/s on one card or two. It isn't benchmarked beyond these two numbers.
 - **The helper card costs nothing on prefill** except on Ling (below).
 
@@ -158,6 +160,104 @@ made no difference.
   layer before the CPU's share could start.
 - Not run on two cards: the hard test, the quality suite, long-context recall.
 
+## DeepSeek: Maya's expert helper and the DSpark drafter
+
+2026-11-12. ISTA's Coder at IQ2_XXS on Project Maya v1.1.60's DeepSeek engine (`maya-ds4`), built for both cards from
+a fork branch (`ds4-2gpu`, two commits), 1M context. `ab.py` and `turns.py` ([measuring.md](measuring.md)) through
+Maya's server, every run from the same expert profile.
+
+| | Decode, new prompts | After a 33K prompt | Prefill | Repeat, 3rd | `turns.py`, six turns |
+|---|---|---|---|---|---|
+| 5090 alone | 36.5-37.7 | 32.3-35.1 | 3,296 | 43.9-48.4 | 32.1 s |
+| Maya's layer split | 46.3 | 46.2 | 1,373 | 55.3 | 41.0 s |
+| Expert helper (`MAYA_DS4_HELPER=1`, 21 GB) | 49.8 | 45.6 | 2,970 | 60.8 | 29.2 s |
+| + `DS4_FLOW_COPY_DMA=1` | 49.8 | 46.8 | 3,163 | 59.8 | 27.2 s |
+| + DSpark, its 384 experts in the 5090's VRAM | 60.1 | 58.6 | 2,509 | 100.2 | 26.0 s |
+| + DSpark on the 3090, beside a 14 GB helper pool | 57.8 | 53.7 | 2,913 | 100.5 | 26.4 s |
+| **+ DSpark, 32 experts a block in VRAM (in use)** | **66** | **60-65** | 3,120-3,165 | **109-115** | **23-26 s** |
+
+First token of the six turns (220 to 10,200 new tokens): 1.6-2.0 / 2.2-2.7 / 2.0-2.6 / 2.3-2.8 / 3.2-3.7 / 4.9-6.0 s in
+use, against 2.9 / 4.3 / 2.5 / 2.8 / 3.3 / 4.8 on one card. On prompts the expert profile never saw
+(`ab-heldout.py`): 22.7 tok/s on one card, 41.8 with the helper, 61-63 with the helper and the drafter.
+
+- **The helper is upstream's** (`MAYA_DS4_HELPER`, which Maya's notes call tested on Linux only): the 5090 runs every
+  layer, the 3090 holds ~2,410 routed experts (21 GB) and answers per layer through host-mapped memory. On Windows it
+  never answered (`ds4: helper CUDA1: no answer to request 2 in 10000 ms`) and the engine went on without it. Two
+  changes on the fork branch: the helper's stream is submitted after its flag is set (WDDM holds queued launches until
+  something flushes them), and a request the helper's thread was never handed goes to the CPU lane instead of timing
+  out and retiring the helper. The second is a guard; it hasn't fired since the first.
+- **`MAYA_DS4_PROMPT_PICK=length:384`.** By default the engine times its two prompt paths at the start and picks per
+  prompt. Here that sent turns of 300-1,400 new tokens through 16-token windows: 4-14 s to the first token on one card,
+  where the chunked pass takes 2.5-3.5 s. Choosing by length fixes that, and stops the start from timing the paths.
+- **`DS4_FLOW_COPY_DMA=1`** DMAs the low-bit experts' RAM copies on the prompt path: mid-size turns in 2.5 s instead of
+  3.3. `DS4_STREAM=0` keeps a new build from re-timing the PCIe link at its first start (it runs that start with half
+  the experts in VRAM).
+- **DSpark works on the pruned Coder.** Maya's `pack_gguf.py` refuses the drafter for a 192-expert model, but that is
+  its geometry check, not the model. A second pack folder whose `tensors.txt` also lists the drafter's tensors in
+  place (the Q8_0 DSpark GGUF that Strata's DeepSeek setup downloads, names mapped with the packer's own table: 3
+  blocks of 128 experts, block size 5, taps on layers 37-39) loads and drafts. 80-96% of drafted tokens are kept on
+  code, up to five a round; code decodes at 90-115 tok/s, prose at 40-60.
+- **Where the drafter's experts sit decides it.** All 384 in the 5090's VRAM push ~940 of the trunk's 2,640 experts
+  out, and prose gets slower than without drafting (35 against 41 tok/s). `MAYA_DS4_DRAFT_VRAM=32` keeps each block's
+  32 most used in VRAM and leaves the rest to the CPU lane (11-26% of the drafter's picks on `ab.py`'s prompts, up
+  to 60% on short chats). Caps of 24, 32 and 48 measured 66.7, 66.4 and 66.8; 64 gave 64.2. On the 3090 the drafter
+  costs helper slots and a hop per round.
+- **The expert profile has to hold the drafter's counts**, since they choose which stay. At a cap of 48, from a
+  profile without them: 60.2 tok/s on unseen prompts; from one that had seen the drafter on other prompts: 65.7.
+- **`MAYA_DS4_SLOT_KEEP=1`** (upstream, opt-in) keeps the conversations it has seen: back to a 17K-token conversation
+  after another one took the model in 0.3 s instead of 6.0. It keeps 4 in RAM and writes older ones, tokens included,
+  to the pack's `slots` folder (16 GB cap, 7 days).
+- **Why drafting pays this much on Windows:** a kernel launch costs the host ~4.85 us, and a decoded DeepSeek token
+  spends ~12 ms in launches against 4.8 ms in the CPU lane. A round that keeps five tokens pays the launches once.
+- **Not adopted** (all with the drafter): the helper's recent slots 57.7; cost-aware drafting 65.7; an 18 GB helper
+  pool 61.6; the launch trimmers (`MAYA_DS4_DECODE_TRIM=7`, `MAYA_DS4_Q8MV_TC=1`, `MAYA_DS4_HEAD_COLS=16`) 67.6-67.9
+  against 65.8-66.8, inside the spread; fused small launches +1% without the drafter.
+- **Spread.** Greedy decode on this engine isn't reproducible: every run of one setup writes a different answer, on
+  one card too. Likely an expert doesn't round alike on the 5090, the 3090 and the CPU, and which has it moves with
+  the caches. Seven runs of the settings in use and their near neighbours: 54.9, 65.8, 66.4, 66.7, 66.8, 67.9, 69.7.
+- **Checks** on the settings in use: `derail.py` 0/20; tools 5/5; facts 8/8 and 7/8; reasoning 7/8 twice, the miss
+  being 1/11 written as `\frac{1}{11}`, which the checker doesn't read; 4 of 4 answers in `content` at effort `max`.
+- The first long prompt after another model had the RAM reads in 14-18 s instead of 10.6: its experts come off the
+  SSD. That was so on one card.
+
+## MiMo: the prompt path
+
+2026-11-12. strata-mimo with the helper card (above), MOPD at MXFP4, 256K, `MIMO_TAIL_KEEP=5`. Decode didn't move:
+34-36 tok/s on new prompts, 27-29 after the 33K prompt. What changed is the wait before the first token.
+
+| | Prefill, 32.7K prompt | TTFT, 227-token turn | 1,348-token turn | 10,188-token turn |
+|---|---|---|---|---|
+| As it was (`--ram-copy 0`) | 1,037 tok/s, 31.7 s | 9.7 s | 11.0 s | 15.1 s |
+| A pinned copy of the 34 layers that fit | 1,246 tok/s, 26.5 s | 5.8 s | 6.8 s | 8.6 s |
+| + the CPU lane on a short prompt's rarely picked experts | 1,210 tok/s | 3.5 s | 5.2 s | 8.6 s |
+| + 32K slices | 1,860 tok/s, 17.9 s | 3.5 s | 5.3 s | 8.7 s |
+| **+ the unpinned layers read back into RAM at the start (in use)** | **2,810 tok/s, 11.9 s** | **3.5 s** | **4.9 s** | **8.7 s** |
+
+- **What a prompt costs.** The batched prompt path copies every routed expert the 5090 doesn't hold over PCIe whole,
+  13.4 MB, once per layer and slice, however few tokens picked it. A 227-token turn uses 209 of a layer's 256 experts
+  and copies 185: 108 GiB for 227 tokens. From the file cache those copies ran at 9-15 GB/s, from pinned memory at the
+  link's 28.8.
+- **The pinned copy.** The engine's pinned copy of all 47 layers (150 GB) never fit here. It now pins layers while the
+  commit limit allows and reads the rest through the mapping: 34 of 47, 108 GiB ([pinned-memory.md](pinned-memory.md)).
+  The 34 stream at the link rate; the 13 others cost about as much time as the 34.
+- **The CPU's share** (slices up to 4,096 tokens). In a short prompt most experts are picked by a handful of tokens.
+  Those go to the CPU lane, which computes an expert from RAM in about the time its copy takes (0.43 against 0.47 ms),
+  while the card copies and computes the rest; the card's picks get them masked out. Reads and copies share the RAM's
+  bandwidth, ~35 GB/s together, so short turns stop at ~3.5 s.
+- **32K slices** halve the copies of a 16-32K prompt. The prompt's buffers borrow 292 expert slots instead of 228.
+- **The helper's refill left the first token's path.** After a long prompt up to 1,024 experts went to the 3090
+  before the answer began, ~5 ms each. Its worker thread copies them now while the answer starts, straight from pinned
+  memory where the layer is pinned; its first fill at the start comes after the pinned copy for the same reason.
+- **The start went from 17-20 s to 1.8-2.4 minutes**: about a minute for the copy. The copy also pushes the 13
+  unpinned layers out of the file cache, and the first turn after a start then took 20 s. A thread reads them back at
+  the start (41 GiB in 8-11 s) and the first turn takes 5.7 s. With `--ram-copy 0` the start is 17 s again and the CPU's
+  share and the 32K slices still apply.
+- **Not adopted.** Verifying a draft only when the MTP head gives it 50% or more: 2% slower, although its drafts below
+  0.5 are right only 27-45% of the time. Pinning the file's pages in place instead of copying them: fewer layers
+  ([pinned-memory.md](pinned-memory.md)). FP16 tensor-core products for the experts: the copies set the pace.
+- **Checks:** `derail.py` 0/20 twice; tools 5/5; facts 8/8; reasoning 7/8 twice, a different letter puzzle each time.
+  Those prompts are under 128 tokens and take the window path, which didn't change.
+
 ## What carried across the four ports
 
 - **No-steal** between the two caches (above).
@@ -167,6 +267,9 @@ made no difference.
 - **Filling a 23 GB helper takes 3.5-4 s warm**, about 6 GB/s from pageable memory an expert at a time. Pinned staging
   does 14 GB/s here, so the refill after a long prompt could be shorter.
 - **Right after a long prompt** the helper gains on Nemotron and MiMo, little on Inkling, nothing on Ling.
+- **The refill after a long prompt can leave the first token's path.** On strata-mimo it was up to 1,024 expert
+  copies at ~5 ms each before the answer began; since 2026-11-12 the helper's worker thread makes them while the
+  answer starts.
 
 ## The 3090 itself
 

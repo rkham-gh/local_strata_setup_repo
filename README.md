@@ -2,7 +2,7 @@
 
 Optimized setups (Strata, Project Maya, Maya-based custom engines, tuned llama.cpp presets) against an unoptimized
 baseline, mostly stock llama.cpp, on one RTX 5090 + 192 GB box. Plus a 25-task hard test at each model's own settings,
-and what a second card (an RTX 3090, added 2026-11-11) buys each engine. Measured 2026-10-29 to 2026-11-11.
+and what a second card (an RTX 3090, added 2026-11-11) buys each engine. Measured 2026-10-29 to 2026-11-12.
 
 ## System
 
@@ -12,7 +12,7 @@ and what a second card (an RTX 3090, added 2026-11-11) buys each engine. Measure
 | Board | ASUS ProArt X870E-Creator WiFi |
 | GPU | RTX 5090 FE 32 GB, 450 W limit, driver 617.42 |
 | Second GPU | RTX 3090 24 GB, 320 W limit, since 2026-11-11. Used only in the "Second GPU" section |
-| PCIe | 5090: Gen5 **x8**, 28.7 GB/s H2D pinned. 3090: Gen4 x8 |
+| PCIe | 5090: Gen5 **x8**, 28.7 GB/s H2D pinned. 3090: Gen4 x8, 13.3 GB/s |
 | RAM | 192 GB DDR5 (2x32 + 2x64), rated 5600, **running 3600 MT/s**. The CPU expert lanes see 37-50 GB/s |
 | OS / stack | Windows 11 Pro 26300, CUDA 13.4, llama.cpp b12017, Strata 0.2.10 (engine 0.1.56), Project Maya v1.1.52 |
 
@@ -45,12 +45,14 @@ at the model's own sampling (`spec-sweep.py`), where drafting matters.
 | **DeepSeek-V4.1-Flash Coder** IQ2_XXS | llama.cpp, own `--fit`, 16K | 21.7 | | | |
 | | llama.cpp, `--cpu-moe` + 22 GB `moe-cache`, q8_0 KV, 64K | 29.8 | 29.7 | 472 | |
 | | Strata 0.2.10, 256K | 30.0-33.8 | 27.8-29.0 | 1,526-2,483 | |
-| | **Project Maya (ds4 engine), 1M** | **33.5-34.8** | 30.9 | 3,200-3,357 | |
+| | Project Maya (ds4 engine), 1M | 33.5-34.8 | 30.9 | 3,200-3,357 | |
+| | **the same on both cards: the 3090 as Maya's expert helper, DeepSeek's DSpark drafter with 32 experts a block in VRAM** | **66** | **60-65** | 3,120-3,165 | 10.6 s |
 | **GLM-5.3-Flash** | Project Maya, Maya-M (exact) | 22.8 | | ~2,650 | |
 | | **Project Maya, Maya-S24 with expert skips (KL 0.052)** | **38.4** | 36.6 | 2,948 | |
 | **MiMo-V2.6-Flash-RL** MXFP4 | strata-mimo `268fdbc`, stock | 14.9 | | ~950 | |
 | | **strata-mimo + local fixes + `MIMO_TAIL_KEEP=5` (KL 0.037)** | **25.5** | 21 | ~1,030 | |
 | **MiMo-V2.6-Flash-MOPD** MXFP4 | strata-mimo, same setup as RL | **25.7** | 21.1 | 1,034 | 32 s |
+| | **both cards (helper card), pinned copy of 34 of 47 expert layers, CPU lane on short prompts, 32K slices** | **34-36** | 27-29 | **2,810** | **11.9 s** |
 | **Qwen3.8-27B** Q6_K † | llama.cpp, no drafting | 64 | | | |
 | | **llama.cpp, MTP, 2 drafts** | **99** | | 2,630 | |
 | **Gemma 4 31B** QAT Q4 † | llama.cpp, no drafter | 72 | | | |
@@ -58,6 +60,10 @@ at the model's own sampling (`spec-sweep.py`), where drafting matters.
 | **Gemma 4 26B-A4B** Q8_0 † | llama.cpp, no drafter | 202 | | | |
 | | **llama.cpp, MTP drafter** | **311** | 222 at 38K | ~8,000 | |
 | **Nanbeige4.3-33B** Q4_K_M | llama.cpp, q8_0 KV, 80K (`ngram-mod` ~1% on new text, 14x on repeats) | 69 | 38 at 39K | ~2,050 | |
+
+DeepSeek and MiMo on both cards (2026-11-12): [`docs/two-gpu.md`](docs/two-gpu.md). Greedy decode on Maya's DeepSeek
+engine isn't reproducible run to run, and code drafts far better than prose (90-115 against 40-60 tok/s): single
+`ab.py` runs gave 55-70.
 
 Engine notes:
 - **maya-ink, maya-nem, maya-ling** are engines in a Project Maya fork (branches `inkling`, `nemotron`, `ling`). They
@@ -80,7 +86,8 @@ against both cards, same build. Details, per-engine tables and checks: [`docs/tw
 |---|---|---|---|---|---|---|
 | Qwen3.8-Flash-Next IQ3_S | Strata 0.2.10 | **227** | 193 | | | Layer split |
 | GLM-5.3-Flash Maya-S24 | Project Maya | 36-38 | **52.6** | | | Layer split, MTP on |
-| DeepSeek-V4.1-Flash Coder IQ2_XXS | Maya (ds4) | 33.1 | **47.5** | | | Layer split |
+| DeepSeek-V4.1-Flash Coder IQ2_XXS | Maya (ds4) | 33.1 | 47.5 | | | Layer split |
+| | Maya (ds4), fork build | 36.5 | **66** | 32.3 | **60-65** | Maya's expert helper + DSpark drafter (2026-11-12) |
 | Nemotron 3.5 Super UD-Q3_K_XL | llama.cpp | 19.4 | 23.0 | | 25.7 | Device split |
 | | maya-nem | 41.0 | **48.2** | 33.9 | **43.8** | Helper card |
 | Inkling-Small UD-Q4_K_XL | maya-ink | 29.6 | **36.6** | 27.0 | 28.0 | Helper card |
@@ -92,6 +99,12 @@ against both cards, same build. Details, per-engine tables and checks: [`docs/tw
   card, so prefill is unchanged (Ling excepted: 27% slower with two CUDA devices visible, cause open).
 - **Layer splits cost prefill:** GLM and DeepSeek read prompts 40-47% slower on two cards. Flash-Next loses decode
   outright and stays on the 5090.
+- **DeepSeek (2026-11-12)** runs on Maya's own expert helper instead of the layer split, which keeps its prefill, with
+  DeepSeek's DSpark drafter on top: 36.5 to 66 tok/s on new prompts, 48 to 110 on a repeated prompt. The helper needed
+  two fixes to answer on Windows.
+- **MiMo's prompt path (2026-11-12):** a pinned copy of the 34 expert layers the commit limit allows, the CPU lane
+  computing a short prompt's rarely picked experts, 32K slices. A 33K prompt reads in 11.9 s instead of 31.7, and an
+  agent turn's first token comes after 3.5-5 s instead of 10. Decode is unchanged.
 - **MiMo gains most** (+47%) because its CPU share was the largest, and its answers move closer to the exact engine:
   the helper's experts are exempt from `MIMO_TAIL_KEEP` (KL 0.031 to 0.019).
 - Outputs checked on every helper build: top-1 against llama.cpp 87/88, 86/88 and 90/90 on maya-nem, maya-ink and
@@ -150,6 +163,7 @@ How each model lost its points. Per miss, with patterns across models: [`docs/fa
 | [`docs/models.md`](docs/models.md) | Per model: architecture, quant choice, launch settings, env, speeds, memory, correctness vs llama.cpp, quirks |
 | [`docs/hard-test.md`](docs/hard-test.md) | Tasks, scoring, each model's settings, per-task matrix |
 | [`docs/failure-modes.md`](docs/failure-modes.md) | Every miss by type and cause, patterns across models, tool use in the repair job, the 24K budget |
-| [`docs/two-gpu.md`](docs/two-gpu.md) | RTX 3090 as a second card: per-engine one-card vs two-card tables, the helper-card design, checks, the 3090's power sweep |
-| [`docs/measuring.md`](docs/measuring.md) | Measurement method and pitfalls |
+| [`docs/two-gpu.md`](docs/two-gpu.md) | RTX 3090 as a second card: per-engine one-card vs two-card tables, the helper-card design, checks, DeepSeek's expert helper and drafter, MiMo's prompt path, the 3090's power sweep |
+| [`docs/pinned-memory.md`](docs/pinned-memory.md) | Pinned host memory on Windows with two cards: copy rates, the commit limit, pinning a file mapping in place |
+| [`docs/measuring.md`](docs/measuring.md) | Measurement method (`ab.py`, `spec-sweep.py`, `turns.py`) and pitfalls |
 | [`results/hard-test-tasks.csv`](results/hard-test-tasks.csv) | Per-task verdicts, tokens and times for every run |
