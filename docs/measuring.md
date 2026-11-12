@@ -46,3 +46,11 @@ marked † in the README come from this script.
 - **Time with elapsed time, not wall clocks.** A DST change moved the clock back an hour during one run.
 - **A low `max_tokens` cap isn't a failure to solve.** One cap made GLM look as if it couldn't do a coding task it could.
 - **Whole-task benchmarks such as generating a game vary too much** for single runs to rank anything.
+- **Check the PCIe link width before comparing.** After a card was reseated, one linked at x1 and decode halved.
+- **Don't compile while a CPU-lane engine is being timed.** The lane is the bottleneck and the build takes its cores.
+- **A 160 GB+ model needs a second run after other models ran.** MiMo's first `ab.py` pass read 19.6 tok/s, the second
+  24.5; compare second runs.
+- **Environment settings set by a test script leak into the next run in the same shell.** A "background swaps off"
+  switch stayed on for two later runs and made two settings look identical.
+- **Extra CUDA devices visible to a process can change timings on the first one.** maya-ling's prefetch copier ran 38%
+  slower with a second card merely visible. For a one-card baseline set `CUDA_VISIBLE_DEVICES`.

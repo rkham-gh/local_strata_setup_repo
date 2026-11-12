@@ -32,6 +32,10 @@ recorded.
 
 Flash-Next's UD-Q4_K_XL was measured, then deleted; its numbers are in section 1.
 
+Everything in this file is on the RTX 5090 alone. Since 2026-11-11 an RTX 3090 sits beside it, and MiMo, Inkling,
+Nemotron and Ling run with it as a helper card: 36.0, 36.6, 48.2 and 24.7 tok/s on new prompts. The one-card vs
+two-card tables for every engine are in [two-gpu.md](two-gpu.md).
+
 ## Engines
 
 | Engine | Port | Serves | Notes |
@@ -55,6 +59,9 @@ Flash-Next's UD-Q4_K_XL was measured, then deleted; its numbers are in section 1
   folder, model name, GPU, sampling, optional `env`, which Maya puts over the caller's environment), a tokenizer folder
   from its `make_pack.py`, and an `expert-profile.bin` of expert scores, saved after every request and loaded at the
   next start.
+- Since 2026-11-11 `mimo`, `inkling`, `nemotron` and `ling` start two-card builds (fork branches `inkling-2gpu`,
+  `nemotron-2gpu`, `ling-2gpu`; a local patch for strata-mimo). `"gpu": [0, 1]` in the run config turns the helper card
+  on; `"gpu": [0]` runs the same binary on one card.
 - `GET /health`: Strata's reports `"loaded": true`; Maya's is ready when `status` is `ok` and `max_context` is set.
 - Above ~31.8-32 GB of VRAM in use the driver pages VRAM into system RAM and speed collapses. Every setup here stays
   below that.

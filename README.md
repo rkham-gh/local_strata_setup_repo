@@ -1,8 +1,8 @@
 # Local inference benchmarks: Strata, Project Maya, llama.cpp
 
 Optimized setups (Strata, Project Maya, Maya-based custom engines, tuned llama.cpp presets) against an unoptimized
-baseline, mostly stock llama.cpp, on one RTX 5090 + 192 GB box. Plus a 25-task hard test at each model's own settings.
-Measured 2026-10-29 to 2026-11-06.
+baseline, mostly stock llama.cpp, on one RTX 5090 + 192 GB box. Plus a 25-task hard test at each model's own settings,
+and what a second card (an RTX 3090, added 2026-11-11) buys each engine. Measured 2026-10-29 to 2026-11-11.
 
 ## System
 
@@ -11,7 +11,8 @@ Measured 2026-10-29 to 2026-11-06.
 | CPU | Ryzen 9 9950X (16C/32T) |
 | Board | ASUS ProArt X870E-Creator WiFi |
 | GPU | RTX 5090 FE 32 GB, 450 W limit, driver 617.42 |
-| PCIe | Gen5 **x8** (lanes shared with the M.2 slot), 28.7 GB/s H2D pinned |
+| Second GPU | RTX 3090 24 GB, 320 W limit, since 2026-11-11. Used only in the "Second GPU" section |
+| PCIe | 5090: Gen5 **x8**, 28.7 GB/s H2D pinned. 3090: Gen4 x8 |
 | RAM | 192 GB DDR5 (2x32 + 2x64), rated 5600, **running 3600 MT/s**. The CPU expert lanes see 37-50 GB/s |
 | OS / stack | Windows 11 Pro 26300, CUDA 13.4, llama.cpp b12017, Strata 0.2.10 (engine 0.1.56), Project Maya v1.1.52 |
 
@@ -70,6 +71,32 @@ Engine notes:
 - Below about 32 GB of VRAM in use everything holds. Above it, the driver pages VRAM to system RAM and throughput
   collapses (for example, llama.cpp `-ngl 99` without `--cpu-moe` on Nemotron: 3 tok/s).
 
+## Second GPU
+
+An RTX 3090 beside the 5090, 2026-11-11. `ab.py` decode on new prompts and right after the ~33K prompt, the 5090 alone
+against both cards, same build. Details, per-engine tables and checks: [`docs/two-gpu.md`](docs/two-gpu.md).
+
+| Model, quant | Engine | Decode: 5090 alone | Both cards | After 33K: alone | Both | Second card's role |
+|---|---|---|---|---|---|---|
+| Qwen3.8-Flash-Next IQ3_S | Strata 0.2.10 | **227** | 193 | | | Layer split |
+| GLM-5.3-Flash Maya-S24 | Project Maya | 36-38 | **52.6** | | | Layer split, MTP on |
+| DeepSeek-V4.1-Flash Coder IQ2_XXS | Maya (ds4) | 33.1 | **47.5** | | | Layer split |
+| Nemotron 3.5 Super UD-Q3_K_XL | llama.cpp | 19.4 | 23.0 | | 25.7 | Device split |
+| | maya-nem | 41.0 | **48.2** | 33.9 | **43.8** | Helper card |
+| Inkling-Small UD-Q4_K_XL | maya-ink | 29.6 | **36.6** | 27.0 | 28.0 | Helper card |
+| Ling-3.1-flash IQ2_XS | maya-ling | 21.2 | **24.7** | 15.2 | 15.0 | Helper card |
+| MiMo-V2.6-Flash-MOPD MXFP4 | strata-mimo, patched | 24.5 | **36.0** | 20.0 | **29.0** | Helper card |
+
+- **Helper card:** the 3090 holds routed experts only, in a second expert cache. The 5090 still runs the whole model;
+  a token's experts that it doesn't hold are split between the 3090 and the CPU lane. No model state leaves the first
+  card, so prefill is unchanged (Ling excepted: 27% slower with two CUDA devices visible, cause open).
+- **Layer splits cost prefill:** GLM and DeepSeek read prompts 40-47% slower on two cards. Flash-Next loses decode
+  outright and stays on the 5090.
+- **MiMo gains most** (+47%) because its CPU share was the largest, and its answers move closer to the exact engine:
+  the helper's experts are exempt from `MIMO_TAIL_KEEP` (KL 0.031 to 0.019).
+- Outputs checked on every helper build: top-1 against llama.cpp 87/88, 86/88 and 90/90 on maya-nem, maya-ink and
+  maya-ling, `derail.py` 0/20 on all four.
+
 ## Hard test
 
 25 seeded tasks (traces, long multiplication, logic grids, routing and knapsack, constrained writing, a 200-row table, a
@@ -123,5 +150,6 @@ How each model lost its points. Per miss, with patterns across models: [`docs/fa
 | [`docs/models.md`](docs/models.md) | Per model: architecture, quant choice, launch settings, env, speeds, memory, correctness vs llama.cpp, quirks |
 | [`docs/hard-test.md`](docs/hard-test.md) | Tasks, scoring, each model's settings, per-task matrix |
 | [`docs/failure-modes.md`](docs/failure-modes.md) | Every miss by type and cause, patterns across models, tool use in the repair job, the 24K budget |
+| [`docs/two-gpu.md`](docs/two-gpu.md) | RTX 3090 as a second card: per-engine one-card vs two-card tables, the helper-card design, checks, the 3090's power sweep |
 | [`docs/measuring.md`](docs/measuring.md) | Measurement method and pitfalls |
 | [`results/hard-test-tasks.csv`](results/hard-test-tasks.csv) | Per-task verdicts, tokens and times for every run |
