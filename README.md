@@ -14,7 +14,7 @@ and what a second card (an RTX 3090, added 2026-11-11) buys each engine. Measure
 | Second GPU | RTX 3090 24 GB, 320 W limit, since 2026-11-11. Used only in the "Second GPU" section |
 | PCIe | 5090: Gen5 **x8**, 28.7 GB/s H2D pinned. 3090: Gen4 x8, 13.3 GB/s |
 | RAM | 192 GB DDR5 (2x32 + 2x64), rated 5600, **running 3600 MT/s**. The CPU expert lanes see 37-50 GB/s |
-| OS / stack | Windows 11 Pro 26300, CUDA 13.4, llama.cpp b12017, Strata 0.2.10 (engine 0.1.56), Project Maya v1.1.52 |
+| OS / stack | Windows 11 Pro 26300, CUDA 13.4, llama.cpp b12017 (Ripple-65B: b12314, CUDA 13.5), Strata 0.2.10 (engine 0.1.56), Project Maya v1.1.52 |
 
 The big MoEs here are RAM-bandwidth-bound on decode and PCIe-bound on prefill, so expect higher numbers on DDR5-5600+
 and x16.
@@ -57,12 +57,28 @@ at the model's own sampling (`spec-sweep.py`), where drafting matters.
 | **MiMo-V2.6-Flash-MOPD** MXFP4 | strata-mimo, same setup as RL | **25.7** | 21.1 | 1,034 | 32 s |
 | | **both cards (helper card), pinned copy of 34 of 47 expert layers, CPU lane on short prompts, 32K slices** | **34-36** | 27-29 | **2,810** | **11.9 s** |
 | **Qwen3.8-27B** Q6_K † | llama.cpp, no drafting | 64 | | | |
-| | **llama.cpp, MTP, 2 drafts** | **99** | | 2,630 | |
+| | llama.cpp, MTP, 2 drafts | 99-104 | | 2,630 | |
+| | **llama.cpp, z-lab DFlash2, 7 drafts, `--spec-draft-sampling probabilistic`** | **126-134** | | 2,374 | |
 | **Gemma 4 31B** QAT Q4 † | llama.cpp, no drafter | 72 | | | |
-| | **llama.cpp, MTP drafter, 4 drafts** | **170** | 104 at 38K | ~2,550 | |
+| | llama.cpp, MTP drafter, 4 drafts | 168-170 | 104 at 38K | ~2,550 | |
+| | **the same, sampled drafts** | **174** | | | |
 | **Gemma 4 26B-A4B** Q8_0 † | llama.cpp, no drafter | 202 | | | |
-| | **llama.cpp, MTP drafter** | **311** | 222 at 38K | ~8,000 | |
+| | llama.cpp, MTP drafter | 297-311 | 222 at 38K | ~8,000 | |
+| | **the same, sampled drafts** | **312-315** | | | |
 | **Nanbeige4.3-33B** Q4_K_M | llama.cpp, q8_0 KV, 80K (`ngram-mod` ~1% on new text, 14x on repeats) | 69 | 38 at 39K | ~2,050 | |
+| **Ripple-65B Preview** AD-IQ4_XS (dense, both cards) | llama.cpp b12314, layer split (default) | 26.6 | 22.7 | 1,313 | |
+| | llama.cpp b12314, `-sm tensor` 65:35 | 40.8 | 35.2 | 1,091 | |
+| | **b12314 + #31904, layer split 65:35, DFlash2 drafter on the 3090** | **50.5** | **44.8** | 1,331 | 24 s |
+
+Sampled drafts (2026-11-12): llama.cpp's `--spec-draft-sampling probabilistic` samples the draft and verifies it by
+rejection sampling, exact in distribution. At these models' temperature 1.0 it accepts far more of an MTP head's or a
+DFlash2 drafter's tokens than greedy drafting; it was what made z-lab's DFlash2 drafter pay on Qwen3.8-27B (greedy:
+108 against MTP's 104). It doesn't apply to plain DFlash drafters, and Gemma 4's (z-lab's) lost to its MTP heads.
+
+Strata 0.2.13 (2026-11-12): on Windows `strata update` moves only the engines (to 0.1.59); Control stays at 0.1.56.
+On Flash-Next IQ3_S the new engine decodes the same (224.0 tok/s on new prompts over 4 runs, against 224.0 over 3) and
+reads prompts 2-3% faster. 0.2.13's tuned DFlash2 drafter and window of 8 gained nothing on new prompts and
+`--draft-conf 0.55` 2%, so both engines went back to 0.1.56. Details in [`docs/models.md`](docs/models.md), section 1.
 
 DeepSeek and MiMo on both cards (2026-11-12): [`docs/two-gpu.md`](docs/two-gpu.md). Greedy decode on Maya's DeepSeek
 engine isn't reproducible run to run, and code drafts far better than prose (90-115 against 40-60 tok/s): single
@@ -98,6 +114,7 @@ against both cards, same build. Details, per-engine tables and checks: [`docs/tw
 | | the same, 3090 kept clocked + tail skip + prompt settings | | **32.5** | | **27.0** | Helper card |
 | Ling-3.1-flash IQ2_XS | maya-ling | 21.2 | **24.7** | 15.2 | 15.0 | Helper card |
 | MiMo-V2.6-Flash-MOPD MXFP4 | strata-mimo, patched | 24.5 | **36.0** | 20.0 | **29.0** | Helper card |
+| Ripple-65B Preview AD-IQ4_XS | llama.cpp b12314 + #31904 | doesn't fit | **50.5** | | **44.8** | Layer split + its drafter (tensor split without one: 40.8) |
 
 - **Helper card:** the 3090 holds routed experts only, in a second expert cache. The 5090 still runs the whole model;
   a token's experts that it doesn't hold are split between the 3090 and the CPU lane. No model state leaves the first
@@ -107,7 +124,8 @@ against both cards, same build. Details, per-engine tables and checks: [`docs/tw
   against 15-23 on the 5090. A 50 ms sleeping kernel, launched again each token, holds it in P2. The other helper
   engines haven't been re-checked for this ([`docs/two-gpu.md`](docs/two-gpu.md), "The 3090 itself").
 - **Layer splits cost prefill:** GLM and DeepSeek read prompts 40-47% slower on two cards. Flash-Next loses decode
-  outright and stays on the 5090.
+  outright and stays on the 5090; Strata's peer tier and helper cache lose too (196-202 against 217 tok/s), because
+  its 5090 cache already hits 94-98% and each layer then waits on the 3090 through host memory.
 - **DeepSeek (2026-11-12)** runs on Maya's own expert helper instead of the layer split, which keeps its prefill, with
   DeepSeek's DSpark drafter on top: 36.5 to 66 tok/s on new prompts, 48 to 110 on a repeated prompt. The helper needed
   two fixes to answer on Windows.

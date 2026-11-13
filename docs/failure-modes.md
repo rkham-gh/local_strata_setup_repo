@@ -31,6 +31,7 @@ tasks flip between runs: Flash-Next IQ3_S's 262K re-runs gained two tasks over i
 | Ling-3.1-flash | 21 | | | | 2 | | | 2 (128K context) | | 42% |
 | Qwen3.8-Flash-Next UD-Q4_K_XL | 21 | | | | 2 | 1 | 1 | | | 32% |
 | Qwen3.8-27B | 20 | | 1 | | 2 | | 2 | | | 26% |
+| Ripple-65B Preview | 20 | | 1 | | 1 | 1 | 1 | 1 (192K context) | | 42% |
 | DeepSeek-V4.1-Flash Coder | 19 | | 1 | | 2 | 1 | 1 | | 1 cut off | 52% |
 | Gemma 4 26B-A4B | 18 | | 2 | | 4 | | 1 | | | 38% |
 | Nanbeige4.3-33B | 18 | 2 | 1 | | 3 | | 1 | | | 36% |
@@ -107,6 +108,22 @@ stopped them.
 - **Loop, JSON.** A run of zeros, stopped at 41K tokens.
 - **Slip, trace-3.** Two of its five values were wrong.
 - **Bugs.** Regex got 5 cases wrong, among them plain `[a-c]+d?` on `abcd`. Scheme fails a plain `cond`.
+
+### Ripple-65B Preview
+
+A dense 65B that decides for itself when to think. It solved regex (21K tokens) and JSON (33K) in the same run, a pair
+only Nanbeige also managed (87K and 46K), plus ordered and diff. Most of the 42% spent on misses is one answer: SAT's
+196K tokens.
+- **Out of room (context), SAT.** It thought for 90 min and 196K tokens, still weighing how to move watched literals
+  ("Standard: swap with the watch that is `p`? Actually, ..."), and reached the 192K context with no answer. The
+  context was set by VRAM: the model, its drafter and 192K of q8_0 cache fill both cards.
+- **Loop, word list.** `"hajj?":`, thousands of times, ended by `--loop-guard` at 21K tokens. Qwen3.8-27B (`"mal?"`)
+  and Nanbeige looped on the same task the same way.
+- **Bug, Scheme.** Its subtraction builtin gets something that isn't a number (`TypeError` in `res -= a`): the evaluator
+  hands an unevaluated form down.
+- **Slow, Sudoku.** A bitmask solver with a popcount table, over the 10 s limit.
+- **Slip, trace-2.** `6 [93, 81, 91] []` against `6 [81, 91, 11] []`: the count right, the list one step off.
+- **Repair.** 10/10 in 11 turns and 25 tool calls, and it called `finish`.
 
 ### DeepSeek-V4.1-Flash Coder
 
@@ -293,7 +310,7 @@ Gemma 31B, MiMo RL and Nemotron. Flash-Next Q4's timed out. Only Qwen3.8-27B and
 Inkling 2's solved 7 of 8 in 0.1 s and stalled on the sixth, the classic worst case for propagation with
 fewest-candidates search.
 
-**JSON.** Only Ling, Nanbeige and Inkling 2 passed. Four parsers broke on `\u` escapes:
+**JSON.** Only Ling, Nanbeige, Ripple-65B and Inkling 2 passed. Four parsers broke on `\u` escapes:
 - Gemma 31B and Nemotron reject a lone surrogate, which `json.loads` accepts.
 - MiMo RL doesn't combine a surrogate pair.
 - Gemma 26B decodes `é` wrong.

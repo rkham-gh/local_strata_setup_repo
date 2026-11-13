@@ -49,6 +49,7 @@ thinking at 32,768 tokens.
 | Nanbeige4.3-33B (llama.cpp) | 0.6 / 0.95, top-k and min-p off (the card's reasoning row) | always on | to 96K: the most context that fits in VRAM with q8_0 KV |
 | GLM-5.3-Flash Maya-S24 | 1.0 / 0.95, stop on `<\|assistant\|>` | `max`; capped tasks re-run at `high`, then `low` | 131,072 (the listed output) in 256K; re-runs 262,144 |
 | MiMo-V2.6-Flash RL and MOPD (strata-mimo, `MIMO_TAIL_KEEP=5`) | 1.0 / 0.95 (the card; Xiaomi's API forces it with thinking on) | on (no levels) | 131,072 in 256K |
+| Ripple-65B Preview AD-IQ4_XS (llama.cpp b12314 + #31904, both cards, DFlash2 drafter) | 0.6 / 0.95 (Ricursive publishes none) | the model decides when to think; no levels | to the 192K context |
 
 ## Results at their best
 
@@ -60,6 +61,7 @@ thinking at 32,768 tokens.
 | Ling-3.1-flash IQ2_XS | **21** | 21 | 3 (+2 cut off at 128K) | 744 min | 992K | 22 tok/s |
 | Qwen3.8-Flash-Next UD-Q4_K_XL | **21** | 21 | 3 | 92 min | 830K | 150 tok/s |
 | Qwen3.8-27B Q6_K | **20** | 20 | 4 | 130 min | 788K | 101 tok/s |
+| Ripple-65B Preview AD-IQ4_XS | **20** | 20 | 4 (+1 cut off at 192K) | 216 min | 657K | 51 tok/s |
 | DeepSeek-V4.1-Flash Coder IQ2_XXS | **19** | 19 | 2 | 298 min | 1,132K | 63 tok/s |
 | Gemma 4 26B-A4B Q8_0 | **18** | 18 | 2 | 22 min | 458K | 349 tok/s |
 | Nanbeige4.3-33B Q4_K_M | **18** | 19 | 3 | 412 min | 1,034K | 42 tok/s |
@@ -80,36 +82,36 @@ Average decode includes prefill time. It isn't the short-prompt decode in the RE
 
 Per task. Each cell is the verdict and the tokens written:
 
-| Task | Flash-Next IQ3_S | Inkling-Small | Ling-3.1-flash | Flash-Next Q4 | Qwen3.8-27B | DeepSeek Coder | Gemma 4 26B | Nanbeige4.3-33B | MiMo MOPD | MiMo RL | Gemma 4 31B | Nemotron Q3 | GLM (max, 131K) | Inkling 2 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| trace-1 | ok 1.7K | ok 1.8K | ok 4.2K | ok 2.0K | ok 2.0K | ok 2.2K | ok 6.7K | ok 2.8K | ok* 2.0K | x 2.3K | ok 4.5K | ok 2.9K | ok 2.5K | ok 1.4K |
-| trace-2 | ok 6.4K | ok 11.1K | ok 10.9K | ok 5.5K | ok 7.4K | x 6.5K | ok 12.7K | ok* 7.6K | ok 3.6K | ok 4.5K | ok* 7.2K | ok 7.6K | ok 11.2K | ok 7.8K |
-| trace-3 | ok 5.7K | ok 17.5K | ok 17.9K | ok 6.8K | x 6.9K | ok 6.4K | ok 15.6K | ok 19.1K | x 13.7K | ok 6.5K | ok 8.1K | x 10.3K | ok 13.7K | ok 8.1K |
-| multiply-8d | ok 4.7K | ok 9.0K | ok 35.2K | ok 9.9K | ok 7.8K | ok 2.2K | ok 21.1K | ok 19.3K | ok 10.2K | ok 10.1K | ok 12.3K | ok 6.3K | ok 22.7K | ok 2.6K |
-| multiply-14d | ok 14.7K | ok 37.0K | ok 53.8K | ok 13.4K | ok 22.1K | ok 32.0K | ok 46.2K | ok 32.5K | ok 87.4K | ok 114.0K | ok 17.7K | ok 11.6K | len 131.1K | ok 21.2K |
-| multiply-20d | ok 11.8K | ok 32.4K | ok 28.2K | ok 17.9K | ok 32.9K | ok 22.2K | x 59.3K | ok 97.1K | ok 73.8K | ok 66.7K | x 23.2K | ok 20.5K | len 131.1K | ok 40.5K |
-| grid-4x3 | ok 1.3K | ok 3.5K | ok 1.1K | ok 1.4K | ok 1.5K | ok 1.2K | ok 5.9K | ok 1.4K | ok 1.8K | ok 1.5K | ok 2.3K | ok 2.4K | ok 4.1K | ok 1.4K |
-| grid-5x4 | ok 2.2K | ok 5.4K | ok 2.3K | ok 5.0K | ok 2.8K | ok 3.2K | ok 7.4K | ok 3.9K | ok 3.0K | ok 3.3K | ok 5.4K | ok 5.8K | ok 5.2K | ok 3.7K |
-| grid-6x4 | ok 15.9K | ok 22.3K | ok 16.0K | ok 17.9K | ok 12.8K | ok 13.7K | ok 15.4K | ok 19.5K | ok 34.1K | ok 18.5K | ok 8.9K | ok 25.4K | ok 39.5K | ok 28.8K |
-| tour-7 | ok 50.8K | ok 46.7K | ok 14.5K | ok 52.7K | ok 33.7K | ok 52.8K | ok 29.9K | ok 42.1K | ok 23.8K | ok 25.5K | ok 13.1K | ok 24.7K | ok 48.4K | ok 31.7K |
-| tour-9 | ok 62.8K | ok 62.8K | ok 95.8K | ok 68.9K | ok 60.3K | ok 120.6K | ok 34.3K | ok 70.1K | len 131.1K | len 131.1K | ok 14.0K | ok 53.7K | len 131.1K | ok 68.0K |
-| knapsack-16 | ok 62.8K | ok 43.9K | ok 35.3K | ok 63.1K | ok 36.3K | ok 41.6K | ok 25.7K | ok 65.4K | ok 81.5K | len 131.1K | ok 10.2K | ok 71.5K | len 131.1K | ok 50.7K |
-| follow-acrostic | ok 1.2K | ok 1.4K | ok 1.0K | ok 1.2K | ok 1.5K | ok 1.1K | ok 5.7K | ok 1.3K | x 0.8K | ok 1.0K | ok 2.1K | ok 1.4K | ok 1.4K | ok 1.0K |
-| follow-lipogram | ok 3.0K | ok 2.6K | ok 2.0K | ok 1.9K | ok 1.8K | ok 3.8K | ok 16.2K | ok 5.7K | ok 12.7K | ok 3.8K | ok 5.3K | ok 2.3K | ok 1.3K | ok 4.3K |
-| follow-words | ok 6.0K | ok 8.8K | ok 14.8K | ok 7.6K | loop 13.7K | ok 12.0K | x 8.8K | loop 15.3K | ok 19.7K | ok 9.2K | ok 3.7K | ok 6.7K | ok 4.0K | ok 5.0K |
-| long-table | ok 23.3K | ok 21.5K | ok 39.1K | ok 25.0K | ok 30.9K | ok 14.2K | ok 11.8K | x 34.5K | x 28.4K | ok 29.4K | ok 9.5K | ok 30.4K | ok 20.3K | ok 15.5K |
-| long-hops | ok 1.1K | ok 3.5K | ok 1.7K | ok 1.9K | ok 1.5K | ok 2.3K | ok 3.5K | ok 2.4K | ok 0.8K | ok 0.7K | ok 1.5K | ok 1.5K | ok 2.8K | ok 1.7K |
-| code-regex | ok 99.5K | x 37.5K | x 29.3K | ok 69.3K | x 61.6K | len 384.0K | loop 31.1K | ok 87.1K | ok 34.0K | x 56.1K | x 8.1K | x 24.7K | len 131.1K | x 21.6K |
-| code-scheme | x 102.0K | ok 57.3K | ok 55.8K | x 109.2K | x 79.6K | x 20.0K | x 18.7K | x 87.9K | x 47.3K | x 49.9K | x 9.0K | x 38.9K | len 131.1K | x 52.5K |
-| code-ordered | ok 35.1K | ok 30.1K | ok 85.0K | ok 102.5K | ok 60.4K | ok 10.7K | ok 8.6K | x 95.9K | ok 14.9K | ok 18.3K | ok 6.6K | x 9.0K | len 131.1K | ok 19.7K |
-| code-diff | ok 77.2K | ok 50.3K | len 130.9K | ok 79.6K | ok 82.0K | ok 186.1K | x 24.3K | ok 76.0K | ok 103.1K | len 131.1K | x 10.7K | x 24.4K | len 131.1K | ok 9.0K |
-| code-sudoku | len 2.2K | x 32.1K | len 131.0K | x 59.1K | ok 63.6K | x 58.3K | ok 8.6K | x 55.5K | x 31.6K | x 110.3K | x 1.6K | x 11.8K | len 131.1K | x 6.3K |
-| code-json | len 16.0K | x 51.0K | ok 34.9K | len 4.6K | loop 40.9K | x 28.0K | x 12.9K | ok 46.0K | loop 31.4K | x 26.4K | x 7.5K | x 23.6K | x 89.6K | ok 22.5K |
-| code-sat | ok 86.5K | x 69.0K | x 125.9K | x 91.1K | ok 108.9K | x 96.6K | x 19.4K | x 80.3K | x 86.8K | x 130.6K | x 4.0K | x 48.1K | len 131.1K | ok 48.2K |
-| kitchen | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 0/10 | 10/10 |
-| **Strict** | **22** | **21** | **21** | **21** | **20** | **19** | **18** | **18** | **16** | **16** | **17** | **17** | **13** | **22** |
-| Lenient | 22 | 21 | 21 | 21 | 20 | 19 | 18 | 19 | 17 | 16 | 18 | 17 | 13 | 22 |
-| Minutes | 51 | 279 | 744 | 92 | 130 | 298 | 22 | 412 | 465 | 580 | 18 | 195 | 782 | 184 |
+| Task | Flash-Next IQ3_S | Inkling-Small | Ling-3.1-flash | Flash-Next Q4 | Qwen3.8-27B | DeepSeek Coder | Gemma 4 26B | Nanbeige4.3-33B | MiMo MOPD | MiMo RL | Gemma 4 31B | Nemotron Q3 | GLM (max, 131K) | Ripple-65B | Inkling 2 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| trace-1 | ok 1.7K | ok 1.8K | ok 4.2K | ok 2.0K | ok 2.0K | ok 2.2K | ok 6.7K | ok 2.8K | ok* 2.0K | x 2.3K | ok 4.5K | ok 2.9K | ok 2.5K | ok 2.5K | ok 1.4K |
+| trace-2 | ok 6.4K | ok 11.1K | ok 10.9K | ok 5.5K | ok 7.4K | x 6.5K | ok 12.7K | ok* 7.6K | ok 3.6K | ok 4.5K | ok* 7.2K | ok 7.6K | ok 11.2K | x 8.6K | ok 7.8K |
+| trace-3 | ok 5.7K | ok 17.5K | ok 17.9K | ok 6.8K | x 6.9K | ok 6.4K | ok 15.6K | ok 19.1K | x 13.7K | ok 6.5K | ok 8.1K | x 10.3K | ok 13.7K | ok 20.7K | ok 8.1K |
+| multiply-8d | ok 4.7K | ok 9.0K | ok 35.2K | ok 9.9K | ok 7.8K | ok 2.2K | ok 21.1K | ok 19.3K | ok 10.2K | ok 10.1K | ok 12.3K | ok 6.3K | ok 22.7K | ok 0.5K | ok 2.6K |
+| multiply-14d | ok 14.7K | ok 37.0K | ok 53.8K | ok 13.4K | ok 22.1K | ok 32.0K | ok 46.2K | ok 32.5K | ok 87.4K | ok 114.0K | ok 17.7K | ok 11.6K | len 131.1K | ok 8.8K | ok 21.2K |
+| multiply-20d | ok 11.8K | ok 32.4K | ok 28.2K | ok 17.9K | ok 32.9K | ok 22.2K | x 59.3K | ok 97.1K | ok 73.8K | ok 66.7K | x 23.2K | ok 20.5K | len 131.1K | ok 15.4K | ok 40.5K |
+| grid-4x3 | ok 1.3K | ok 3.5K | ok 1.1K | ok 1.4K | ok 1.5K | ok 1.2K | ok 5.9K | ok 1.4K | ok 1.8K | ok 1.5K | ok 2.3K | ok 2.4K | ok 4.1K | ok 1.4K | ok 1.4K |
+| grid-5x4 | ok 2.2K | ok 5.4K | ok 2.3K | ok 5.0K | ok 2.8K | ok 3.2K | ok 7.4K | ok 3.9K | ok 3.0K | ok 3.3K | ok 5.4K | ok 5.8K | ok 5.2K | ok 3.0K | ok 3.7K |
+| grid-6x4 | ok 15.9K | ok 22.3K | ok 16.0K | ok 17.9K | ok 12.8K | ok 13.7K | ok 15.4K | ok 19.5K | ok 34.1K | ok 18.5K | ok 8.9K | ok 25.4K | ok 39.5K | ok 45.2K | ok 28.8K |
+| tour-7 | ok 50.8K | ok 46.7K | ok 14.5K | ok 52.7K | ok 33.7K | ok 52.8K | ok 29.9K | ok 42.1K | ok 23.8K | ok 25.5K | ok 13.1K | ok 24.7K | ok 48.4K | ok 20.4K | ok 31.7K |
+| tour-9 | ok 62.8K | ok 62.8K | ok 95.8K | ok 68.9K | ok 60.3K | ok 120.6K | ok 34.3K | ok 70.1K | len 131.1K | len 131.1K | ok 14.0K | ok 53.7K | len 131.1K | ok 62.4K | ok 68.0K |
+| knapsack-16 | ok 62.8K | ok 43.9K | ok 35.3K | ok 63.1K | ok 36.3K | ok 41.6K | ok 25.7K | ok 65.4K | ok 81.5K | len 131.1K | ok 10.2K | ok 71.5K | len 131.1K | ok 47.6K | ok 50.7K |
+| follow-acrostic | ok 1.2K | ok 1.4K | ok 1.0K | ok 1.2K | ok 1.5K | ok 1.1K | ok 5.7K | ok 1.3K | x 0.8K | ok 1.0K | ok 2.1K | ok 1.4K | ok 1.4K | ok 1.2K | ok 1.0K |
+| follow-lipogram | ok 3.0K | ok 2.6K | ok 2.0K | ok 1.9K | ok 1.8K | ok 3.8K | ok 16.2K | ok 5.7K | ok 12.7K | ok 3.8K | ok 5.3K | ok 2.3K | ok 1.3K | ok 6.3K | ok 4.3K |
+| follow-words | ok 6.0K | ok 8.8K | ok 14.8K | ok 7.6K | loop 13.7K | ok 12.0K | x 8.8K | loop 15.3K | ok 19.7K | ok 9.2K | ok 3.7K | ok 6.7K | ok 4.0K | loop 21.3K | ok 5.0K |
+| long-table | ok 23.3K | ok 21.5K | ok 39.1K | ok 25.0K | ok 30.9K | ok 14.2K | ok 11.8K | x 34.5K | x 28.4K | ok 29.4K | ok 9.5K | ok 30.4K | ok 20.3K | ok 13.5K | ok 15.5K |
+| long-hops | ok 1.1K | ok 3.5K | ok 1.7K | ok 1.9K | ok 1.5K | ok 2.3K | ok 3.5K | ok 2.4K | ok 0.8K | ok 0.7K | ok 1.5K | ok 1.5K | ok 2.8K | ok 3.7K | ok 1.7K |
+| code-regex | ok 99.5K | x 37.5K | x 29.3K | ok 69.3K | x 61.6K | len 384.0K | loop 31.1K | ok 87.1K | ok 34.0K | x 56.1K | x 8.1K | x 24.7K | len 131.1K | ok 20.9K | x 21.6K |
+| code-scheme | x 102.0K | ok 57.3K | ok 55.8K | x 109.2K | x 79.6K | x 20.0K | x 18.7K | x 87.9K | x 47.3K | x 49.9K | x 9.0K | x 38.9K | len 131.1K | x 31.4K | x 52.5K |
+| code-ordered | ok 35.1K | ok 30.1K | ok 85.0K | ok 102.5K | ok 60.4K | ok 10.7K | ok 8.6K | x 95.9K | ok 14.9K | ok 18.3K | ok 6.6K | x 9.0K | len 131.1K | ok 18.1K | ok 19.7K |
+| code-diff | ok 77.2K | ok 50.3K | len 130.9K | ok 79.6K | ok 82.0K | ok 186.1K | x 24.3K | ok 76.0K | ok 103.1K | len 131.1K | x 10.7K | x 24.4K | len 131.1K | ok 28.2K | ok 9.0K |
+| code-sudoku | len 2.2K | x 32.1K | len 131.0K | x 59.1K | ok 63.6K | x 58.3K | ok 8.6K | x 55.5K | x 31.6K | x 110.3K | x 1.6K | x 11.8K | len 131.1K | x 19.4K | x 6.3K |
+| code-json | len 16.0K | x 51.0K | ok 34.9K | len 4.6K | loop 40.9K | x 28.0K | x 12.9K | ok 46.0K | loop 31.4K | x 26.4K | x 7.5K | x 23.6K | x 89.6K | ok 33.1K | ok 22.5K |
+| code-sat | ok 86.5K | x 69.0K | x 125.9K | x 91.1K | ok 108.9K | x 96.6K | x 19.4K | x 80.3K | x 86.8K | x 130.6K | x 4.0K | x 48.1K | len 131.1K | len 196.5K | ok 48.2K |
+| kitchen | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 0/10 | 10/10 | 10/10 |
+| **Strict** | **22** | **21** | **21** | **21** | **20** | **19** | **18** | **18** | **16** | **16** | **17** | **17** | **13** | **20** | **22** |
+| Lenient | 22 | 21 | 21 | 21 | 20 | 19 | 18 | 19 | 17 | 16 | 18 | 17 | 13 | 20 | 22 |
+| Minutes | 51 | 279 | 744 | 92 | 130 | 298 | 22 | 412 | 465 | 580 | 18 | 195 | 782 | 216 | 184 |
 
 GLM's attempts on the 11 tasks it re-ran (`-`: not re-run at that level):
 

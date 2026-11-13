@@ -11,20 +11,23 @@ noted.
 
 | Model, quant | Engine | 5090 alone | Both cards | What the second card does |
 |---|---|---|---|---|
-| Qwen3.8-Flash-Next IQ3_S | Strata 0.2.10 | **227** | 193 | Strata's layer split. Every token crosses to the 3090 and back |
+| Qwen3.8-Flash-Next IQ3_S | Strata 0.2.10 | **217-227** | 193-202 | Strata's layer split, peer tier or helper cache: all slower (below) |
 | GLM-5.3-Flash Maya-S24 | Project Maya v1.1.52 | 36-38 | **52.6** | Maya's layer split; MTP drafting comes on with two cards |
 | DeepSeek-V4.1-Flash Coder IQ2_XXS | Maya (ds4) | 33.1 | 47.5 | Maya's layer split |
 | | Maya (ds4), fork build | 36.5 | **66** | Maya's expert helper + DeepSeek's DSpark drafter (2026-11-12, below) |
 | MiniMax-M3.1-Flash Maya-S | Maya (mm3) | 12.7 | **16.9** | Maya's layer split |
 | Nemotron 3.5 Super UD-Q3_K_XL | llama.cpp b12017 | 19.4 | 23.0 | llama.cpp's device split |
-| | maya-nem | 41.0 | **48.2** | Helper card |
+| | maya-nem | 41.0 | **48.2** (57.0 with the 2026-11-12 switches) | Helper card |
 | Inkling-Small UD-Q4_K_XL | maya-ink | 29.6 | **36.6** | Helper card |
 | Inkling 2 Small own 2-bit | maya-ink, `inkling2` | 19.8 | 23.6; **32.5** with the 3090 kept clocked, the tail skip and prompt settings | Helper card (2026-11-12, below) |
 | Ling-3.1-flash IQ2_XS | maya-ling | 21.2 | **24.7** | Helper card |
 | MiMo-V2.6-Flash-MOPD MXFP4 | strata-mimo, patched | 24.5 | **36.0** | Helper card. Prefill 2.7x faster since 2026-11-12 (below) |
+| Ripple-65B Preview AD-IQ4_XS (dense) | llama.cpp b12314 | doesn't fit | **40.8** | `-sm tensor`, 65:35 (2026-11-12) |
+| | llama.cpp b12314 + #31904 | | **50.5** | Layer split 65:35 + its DFlash2 drafter on the 3090 |
 
 - **Flash-Next gets slower.** It already fits the 5090 well enough to decode 227 tok/s. Strata's Windows build has
   only the layer split (the all-cards split engine is Linux-only), and a split at layer 44 was worse still (158).
+  Strata's two ways of keeping extra experts on a second card were tried on 2026-11-12 and lose too (next section).
 - **Maya's layer split trades prefill for decode.** GLM and DeepSeek read prompts 40-47% slower on two cards. DeepSeek's
   first start on two cards decoded 40.1; the second 47.5. Since 2026-11-12 DeepSeek runs on Maya's expert helper
   instead, which keeps its prefill (below).
@@ -186,6 +189,47 @@ made no difference.
   layer before the CPU's share could start.
 - Not run on two cards: the hard test, the quality suite, long-context recall.
 
+## Flash-Next: Strata's peer tier and helper cache
+
+2026-11-12, Strata 0.2.10 (engine 0.1.56), IQ3_S, 256K, DFlash2 drafting, `strata serve --config` on a copy of the
+launch config with the engine flags added. `ab.py`, one run each unless noted.
+
+| | 5090 alone | `--peer-device 1` (2 runs) | `--expert-cache-device1 auto --remote-expert-opt` | Layer split |
+|---|---|---|---|---|
+| Decode, new prompts | **217.0** | 200.6, 196.2 | 201.6 | 192.7 |
+| Decode after a 35K prompt | **208.2** | 163.6, 161.0 | 137.3 | 143.4 |
+| Prefill, 35K | **5,399** | 3,846, 3,978 | 2,962 | 1,776 |
+| Repeated prompt, 1st / 3rd | **288 / 354** | 235-237 / 255-257 | 257 / 253 | 227 / 234 |
+
+The 5090 alone holds 12,039 of 24,576 experts, and with fast re-balancing (`adapt-every 1`, `adapt-swaps 80`) its
+decode hit rate is 94-98% once a request warms up. The few misses go to the CPU and the PCIe upload beside the GPU.
+Both second-card modes move 11-45% of the routed experts to the 3090, and each MoE layer then waits on the 3090's
+result through host memory, since GeForce cards have no peer-to-peer: the helper log shows 0.25-1.1 s of waiting per
+request. `STRATA_ADAPT_OVERLAP` and `STRATA_PF_PEER_CPU` (0.2.12) weren't available on 0.2.10. Strata's own +28% for a
+5090 with a 4090 is measured against its plain helper path, not against one card at this hit rate.
+
+## Ripple-65B: a dense model on both cards
+
+Ripple-65B Preview (Ricursive, 65B dense, 80 layers, 16 of them global attention) at AtomicChat's AD-IQ4_XS (38.7 GB)
+is the first model here that needs both cards. llama.cpp b12314, 192K context, q8_0 cache.
+
+| | Layer split 57:43 (default) | Layer split 70:30 | `-sm tensor` 65:35 | Layer 65:35 + DFlash2 on the 3090 |
+|---|---|---|---|---|
+| Decode, thinking on, T 0.6 | 26.4 | 28.5 | 40.5 | 40.3-44.4 |
+| Decode, new prompts, greedy | 26.6 | | 40.8 | **50.5** (code 78-114, prose 31-37) |
+| Decode after a 32K prompt | 22.7 | | 35.2 | **44.8** |
+| Prefill, 32K | 1,313 | | 1,091 | **1,331** |
+
+- The tensor split (experimental) has both cards read their share of every layer at once; the all-reduce goes through
+  host memory and still wins by 50% over taking turns. 70:30 decodes 41.4; 75:25 doesn't fit the 5090; `-sm row`
+  refuses to load ("does not support split buffers").
+- Ripple's DFlash2 drafter needs ggml-org/llama.cpp#31904 (Ripple records its layer inputs; the DFlash2 graph budget
+  scales with the 16-token block). It can't join the tensor split: on CUDA0 it doesn't fit beside the model, and on
+  CUDA1 the split backend asserts (`src_ss[0].axis != GGML_BACKEND_SPLIT_AXIS_0`). On the layer split it runs on the
+  last card, beside the output head it shares.
+- ik_llama.cpp (Ripple since 2026-11-06) falls back from `-sm graph` to the layer split for this model and allocates the
+  full context for all 80 layers, so 192K didn't fit.
+
 ## DeepSeek: Maya's expert helper and the DSpark drafter
 
 2026-11-12. ISTA's Coder at IQ2_XXS on Project Maya v1.1.60's DeepSeek engine (`maya-ds4`), built for both cards from
@@ -290,12 +334,37 @@ use, against 2.9 / 4.3 / 2.5 / 2.8 / 3.3 / 4.8 on one card. On prompts the exper
 - **Copy swaps off the token's thread** once experts are over ~10 MB.
 - **Swap rate is per model**: 16 every 2 tokens on Nemotron, 4 every 2 tokens with a higher bar on Inkling, 32 a token
   on Ling, 2 a window on MiMo (where 1 to 6 all measured the same).
-- **Filling a 23 GB helper takes 3.5-4 s warm**, about 6 GB/s from pageable memory an expert at a time. Pinned staging
-  does 14 GB/s here, so the refill after a long prompt could be shorter.
+- **Filling a 23 GB helper took 3.5-4 s warm**, about 6 GB/s from pageable memory an expert at a time. Through pinned
+  staging (2026-11-12, below) it takes 2.4-2.5 s.
 - **Right after a long prompt** the helper gains on Nemotron and MiMo, little on Inkling, nothing on Ling.
 - **The refill after a long prompt can leave the first token's path.** On strata-mimo it was up to 1,024 expert
   copies at ~5 ms each before the answer began; since 2026-11-12 the helper's worker thread makes them while the
   answer starts.
+
+## Follow-up commits (2026-11-12)
+
+One commit per branch: the helper's fills through two 64 MB pinned buffers the CPU lane's threads fill (as the main
+cache's fills already were), a byte-for-byte fill check (`*_HELPER_VERIFY=1`), and three opt-in switches. Measured
+against the previous builds, both cards, from the same expert profile, interleaved, `ab.py`:
+
+| tok/s | Nemotron before | after, + `NEM_SNAPSHOT=1` + `NEM_HELPER_BG=1` | Inkling before | after | Ling before | after, + `LING_CACHE_PROMPT=2` |
+|---|---|---|---|---|---|---|
+| Decode, new prompts | 47.4-47.8 | **57.0** | 37.4-37.7 | 37.4-38.2 | 26.0-26.1 | 25.9-26.0 |
+| Decode after the long prompt | 42.1-45.5 | **58.1** | 25.5-25.7 | **26.1-33.0** | 14.9-15.4 | **20.5-20.7** |
+| Prefill | 1,820-1,835 | 1,681 | 735-738 | 731-753 | 628 | 625-626 |
+
+- With the switches off, Nemotron's greedy output is the previous build's byte for byte (7 of 7 runs); the fill check
+  passes on all three; chat checks and `derail.py` (0 of 20) pass with and without the switches.
+- `NEM_HELPER_BG=1` (the helper's swaps on their own thread, as Inkling's and Ling's): +5-6% on new prompts.
+- `NEM_SNAPSHOT=1` keeps the Mamba-2 state 4 tokens before a prompt's end, so a new user message reads on instead of
+  re-reading the conversation. Short prompts also skip the prompt path's pass and the helper refill after it, which had
+  pulled both caches toward the prompt's experts: decode +15% on new prompts and +25% after a long one, the first token
+  of a short turn 0.7 s instead of 2.2, prefill -7%. `--restore-check` is exact (0) on one card; on two, the helper's
+  swaps between the passes move a few experts between GPU and CPU, so the logits differ.
+- `*_CACHE_PROMPT` puts a prompt chunk's expert counts on the decode tokens' scale. `=2` closes most of Ling's
+  long-prompt drop (15.4 to 20.6); on Inkling it costs what the faster refill gained; on Nemotron it's neutral.
+- Inkling's gain after a long prompt varies run to run (33.0, 33.0, 30.4, 26.4, 26.1): the faster refill doesn't always
+  land before the answer starts.
 
 ## The 3090 itself
 

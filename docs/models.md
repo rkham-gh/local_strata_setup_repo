@@ -20,7 +20,7 @@ recorded.
 | MiMo-V2.6-Flash-MOPD (RL before 2026-11-08) | — | MXFP4, 170 GB | strata-mimo, patched | 256K | 25.7 tok/s (RL 25.5) | ~1,030 tok/s (2,810 on both cards since 2026-11-12) | grows to ~157 GB (~170 GB with the pinned copy) |
 | DeepSeek-V4.1-Flash Coder | 552B base, half its routed experts removed | ISTA-DASLab IQ2_XXS, 72.1 GB + 110.6 GB Engram table | Project Maya's DeepSeek engine | 1M | 33.5 tok/s (66 on both cards since 2026-11-12) | 3,200-3,300 tok/s | ~43 GB of pinned experts; total — |
 | DeepSeek Coder, fallback | as above | as above | llama.cpp router | 64K | 29.8 tok/s | 472 tok/s | — |
-| Qwen3.8-27B | 27B, dense | Unsloth UD-Q6_K, 22 GB + 1.4 GB MTP head | llama.cpp router | 208K | 128 tok/s | 2,630 tok/s | a few GB |
+| Qwen3.8-27B | 27B, dense | Unsloth UD-Q6_K, 22 GB + 1.1 GB DFlash2 drafter (1.4 GB MTP head before 2026-11-12) | llama.cpp router | 208K | 166 tok/s (128 with the MTP head) | 2,374 tok/s (2,630) | a few GB |
 | Nanbeige4.3-33B | 33B, dense | bartowski Q4_K_M, 20.8 GB | llama.cpp router | 80K (96K for its hard-test runs) | 69 tok/s | ~2,050 tok/s | little: all in VRAM |
 | Gemma 4 26B-A4B | 25.2B / 3.8B | Q8_0, 26.9 GB + 0.5 GB drafter | llama.cpp router | 224K | 318 tok/s | ~8,000 tok/s | a few GB |
 | Gemma 4 31B | 31B, dense | Google's QAT 4-bit as UD-Q4_K_XL, 17.3 GB + 0.3 GB drafter | llama.cpp router | 224K | 184 tok/s | ~2,550 tok/s | a few GB |
@@ -30,18 +30,19 @@ recorded.
 | Nemotron 3.5 Super VL, Q4 | 120B / 12B | Unsloth UD-Q4_K_XL, 86.9 GB | maya-nem | 256K | 26.3 tok/s | 1,607 tok/s | ~84 GB |
 | Nemotron 3.5 Super VL, pictures | 120B / 12B | UD-Q4_K_XL + 1.7 GB picture encoder | llama.cpp router | 256K | 13.0 tok/s | ~474 tok/s | — |
 | Ling-3.1-flash | 564B / 25B | bartowski IQ2_XS, 177.4 GB | maya-ling | 128K | 22.4 tok/s | 876 tok/s | ~160 GB (24 GB free) |
+| Ripple-65B Preview | 65B, dense | AtomicChat AD-IQ4_XS, 38.7 GB + 2.3 GB DFlash2 drafter | llama.cpp b12314 + #31904, **both cards** | 192K | 50.5 tok/s | ~1,330 tok/s | a few GB |
 
 Flash-Next's UD-Q4_K_XL was measured, then deleted; its numbers are in section 1.
 
-Everything in this file is on the RTX 5090 alone. Since 2026-11-11 an RTX 3090 sits beside it, and MiMo, Inkling,
-Nemotron and Ling run with it as a helper card: 36.0, 36.6, 48.2 and 24.7 tok/s on new prompts. The one-card vs
-two-card tables for every engine are in [two-gpu.md](two-gpu.md).
+Everything in this file is on the RTX 5090 alone, except Ripple-65B (section 11), which needs both cards. Since
+2026-11-11 an RTX 3090 sits beside the 5090, and MiMo, Inkling, Nemotron and Ling run with it as a helper card: 36.0,
+36.6, 48.2 and 24.7 tok/s on new prompts. The one-card vs two-card tables for every engine are in [two-gpu.md](two-gpu.md).
 
 Since 2026-11-12 DeepSeek uses both cards as well (Maya's expert helper and DeepSeek's drafter, 66 tok/s: section 4),
 and MiMo's prompt path was reworked (prefill 2.7x, an agent turn's first token after 3.5-5 s instead of 10: section
 3). Both are detailed in [two-gpu.md](two-gpu.md).
 
-Inkling 2 Small (section 11, released 2026-11-12) is measured on both cards, as it runs; its one-card figures are
+Inkling 2 Small (section 12, released 2026-11-12) is measured on both cards, as it runs; its one-card figures are
 from its first build.
 
 ## Engines
@@ -113,7 +114,7 @@ Engines with a VRAM expert cache start each A/B run from the same saved expert p
 |---|---|
 | Architecture | MoE with its own MTP head; text and pictures. Total and active parameters not recorded |
 | Quant | ISTA-DASLab IQ3_S, 84 GB, checked against its pinned SHA-256 |
-| Engine | Strata 0.2.10 (engine and terminal 0.1.56) |
+| Engine | Strata 0.2.10 (engine and terminal 0.1.56); 0.2.13's engine tried and rolled back (below) |
 | Launch | `switch-model.ps1 flash-next`, ready in 75-115 s. Port 8080, model ID `qwen3.8-flash-next-iq3_s` (Strata ignores the name, so older IDs work too) |
 | Context | 256K, the model file's limit (262,144) |
 | VRAM, RAM | 30.3-30.4 GB, 85-88 GB; ~11,900 experts (49%) in VRAM |
@@ -134,7 +135,7 @@ strata.cmd launch --family qwen --model IQ3_S --model-path <IQ3_S folder> --cont
 
 | Setting | Notes |
 |---|---|
-| Drafting | 0.2.10 picks DFlash2 on this card (a 1.2 GB drafter, downloaded and packed on first start) and its own window, `--spec 6`. 0.1.54 drafted with the MTP head, best at a 5-token window; that setting went with the update |
+| Drafting | 0.2.10 picks DFlash2 on this card (a 1.2 GB drafter, downloaded and packed on first start) and its own window and confidence, `--spec 6 --draft-conf 0.5`. 0.1.54 drafted with the MTP head, best at a 5-token window; that setting went with the update |
 | `adapt-every=1`, `adapt-swaps=80`, `adapt-decay=0.97` | Faster VRAM expert re-balancing than the defaults; the script restarts an IQ3_S engine running without them |
 | `vram-reserve-mib=1200` | A plain `strata launch` drops it to 700 MiB, and the engine warns VRAM is nearly full. At 1,200 the log shows ~999 MiB free once; harmless |
 | `--vision cpu` | ~3 s per chart, VRAM left to experts; with the smaller reserve, +4% |
@@ -169,6 +170,48 @@ A PCIe share of 0.25 changed nothing. DFlash2 couldn't serve requests on 0.1.54;
 speed on Linux only. Thinking on, own sampling (`spec-sweep.py`): 208. `deep-test.py` on 0.1.54: TTFT 21, 26, 35 and
 44 s at ~125K, 150K, 200K and 250K tokens, decode 173, 164, 173 and 186, every hidden note found. A follow-up reads only
 the new text, in 0.5-2 s; going back a step at 125K took 1-2 s.
+
+**Strata 0.2.13, tried 2026-11-12 and rolled back.** On Windows `strata update` moves only the engines (Qwen and
+DeepSeek, 0.1.56 to 0.1.59, each after a test start); Control stays at 0.1.56 ("Control not part of this feed"), so
+`strata --version` still reads 0.2.10. 0.2.13's new drafting defaults skip this card anyway. The tuned DFlash2 pack
+(`qwen3.8-flash-next-dflash2.strata1.q4_0-selq4.pack`, 0.34 GB) is picked only where Strata expects 12,000+ expert
+slots; the 5090 holds ~12,040 but is estimated below that, which is also why it gets confidence 0.5 rather than 0.35.
+Window 8 at confidence 0.55 is for Blackwell cards of 48 GB+, and on smaller ones 0.1.59 caps the window at 6 unless
+given `--draft-cap 8`.
+
+`--set` can't tune drafting through Control 0.1.56: it rebuilds the flags at every start (`apply` in
+`strata_control/drafting.py`). `--draft-model` is its own pick, `--draft-cap` is dropped, and `--spec` / `--draft-conf`
+survive only from the run config's `"user_args"`; `--spec 8 --draft-conf 0.55 --draft-cap 8` through `--set` reaches
+the engine as `--spec 6 --draft-conf 0.5`. These runs used `strata serve` on a copy of the launch config under a model
+name Control doesn't know, which it leaves alone; the copy at the usual flags matched a normal start (222.9 and 223.6
+against 223.5 and 226.0). `ab.py`, tok/s:
+
+| IQ3_S | Runs | Decode, new prompts | Decode, 35K deep | Prefill, 35K | `match.py` | Drafts accepted |
+|---|---|---|---|---|---|---|
+| **0.1.56, window 6, confidence 0.5 (in use)** | 3 | **223.0-225.3** | 199-216 | 5,397-5,494 | 273.6-275.4 | 69% |
+| 0.1.59, same flags | 4 | 222.9-226.0 | 190-205 | 5,613-5,635 | 273.5-277.4 | 69% |
+| 0.1.59 + tuned drafter | 1 | 222.0 | 214 | 5,602 | 277.9 | 66% |
+| 0.1.59 + window 8 (`--spec 8 --draft-cap 8`) | 1 | 223.1 | 198 | 5,625 | 278.8 | 66% |
+| 0.1.59 + confidence 0.55 | 3 | 227.7-228.7 | 202-213 | 5,604-5,618 | 275.6-278.6 | 73% |
+| 0.1.59 + confidence 0.6 | 1 | 226.9 | 195 | 5,595 | 281.8 | 74% |
+| 0.1.59 + tuned drafter at 0.55 | 1 | 226.2 | 218 | 5,611 | 274.7 | 72% |
+| 0.1.59 + tuned drafter at 0.7 | 1 | 218.0 | 191 | 5,578 | 273.6 | 77% |
+| 0.1.59 + window 8 at 0.55 | 1 | 219.5 | 197 | 5,607 | 276.9 | 67% |
+| 0.1.59 + tuned drafter, window 8 at 0.55 (what 0.2.13 runs on a 72 GB RTX PRO 5000) | 2 | 220.8, 222.2 | 201, 233 | 5,576-5,592 | 279.6, 285.1 | 68% |
+| 0.1.56 + confidence 0.55 | 1 | 225.9 | 194 | 5,491 | 279.7 | 72% |
+
+- 0.1.59 reads prompts 2-3% faster (5,620 against 5,460 tok/s on the 35K prompt, 5,900 against 5,780 on `match.py`'s
+  33K) and decodes the same.
+- Confidence 0.55 was the only gain on new prompts: 2.0% on 0.1.59, all three runs above the default's four, and 0.8% on
+  0.1.56 in one run; 0.6 about the same. Under the 3% noise bar, so not kept.
+- The tuned drafter had about as many drafts accepted as the stock one (1,632 against 1,628), from longer windows (2,481
+  drafts against 2,357). At 0.7, Strata's pairing for it on the Mac, the windows got too short: 218.
+- Window 8 pays only once the expert cache has adapted: with the tuned drafter at 0.55, 282 on `match.py`'s repeated
+  chats (2.5% over the default) but 1% less on new prompts. With the stock drafter it gained on neither.
+- `derail.py`: 0 of 20 on 0.1.59 at 0.55.
+- Rollback: `strata components rollback` pins the Qwen engine at 0.1.56 and marks 0.1.59 skipped, so `strata update`
+  won't reinstall it without `--force`; `strata components use 0.1.56 --family deepseek` resets the DeepSeek engine.
+  Afterwards: 225.3 on new prompts, 273.6 on `match.py`.
 
 **Checks.** Quality suite: facts 8/8, logic 8/8, tools 5/5, a chart read correctly, the 3 coding tasks at `high` in
 16-36 s each, the agent bug-fix task in 9.9 s. `derail.py`: 0 of 20 derailed on 0.1.54 and again on 0.2.10.
@@ -547,6 +590,21 @@ drafts are accepted:
 On build 12000 at 128K: 65 tok/s plain and 107 with MTP on short prompts, 57 (at 32K) and 96 (at 43K) deep, prefill
 ~3,400 tok/s (2,500-2,700 at 32K-43K deep). In the hard test it decoded 788K tokens at ~99 tok/s.
 
+**Drafter, since 2026-11-12:** z-lab's DFlash2 drafter (`z-lab/Qwen3.8-27B-DFlash2-GGUF`, Q4_K_M, 1.1 GB; the Q8_0
+doesn't fit beside 208K) with `spec-draft-sampling = probabilistic`, 7 tokens a step. Sampled drafts are checked by
+rejection sampling (accept with min(1, p/q), else draw from the residual), so the output distribution is the model's.
+Same build 12017, same preset otherwise:
+
+| Thinking on, card sampling (`spec-sweep.py`) | Greedy drafts | Sampled drafts |
+|---|---|---|
+| MTP head, 2 drafted (before) | 103.9 | 112.6 (3: 120.8, 4: 119.3) |
+| DFlash2, 7 drafted | 108.1 (4: 107.3, 5: 105.1) | **126.1-134.1 over 4 runs** (5: 116.0, 8: 132.1, 10: 129.0) |
+
+Greedy, thinking off (`ab.py`, same day): 165.7 tok/s on new prompts against 125.6 with MTP-2, 110.4 against 99.0 after
+a 35K prompt, 206 against 134 on a repeated prompt; prefill 2,374 against 2,562 (the drafter reads the prompt too).
+31.2 GB of VRAM. Through the router: 127.9 tok/s. 2.2-3.6 tokens accepted per step on these prompts, against z-lab's
+5+ on GSM8K. A DFlash drafter shares the model's output head, so it can't sit on the 3090.
+
 **Quirks.**
 
 - Its template keeps all earlier thinking by default (`preserve_thinking`): send `reasoning_content` back with earlier
@@ -625,7 +683,10 @@ Both start with `switch-model.ps1 router`, answer on port 9931 and use a few GB 
 all layers on the GPU, q8_0 K and V cache, `no-mmproj-offload = true`, `parallel = 1`, `spec-type = draft-mtp`,
 `spec-draft-n-max = 4`, `reasoning = on`, and Google's sampling for every Gemma 4: temperature 1.0, top-p 0.95, top-k
 64, min-p 0. llama.cpp's own min-p default of 0.05 cuts further. Keep Google's sampling for hard work: at temperature
-0.6 the 31B coded no better.
+0.6 the 31B coded no better. Since 2026-11-12 both also set `spec-draft-sampling = probabilistic` (sampled MTP drafts,
+checked by rejection sampling): 174.0 against 167.5 tok/s on the 31B, 312-315 against 297.4 on the 26B, thinking on.
+z-lab's DFlash drafters for Gemma 4 (plain DFlash, no selector, so greedy drafts only) lost on the 26B: 212 and 194
+tok/s at 10 and 16 drafted, 14-20% accepted, and they need ~1 GB more than 224K leaves.
 
 In Unsloth's own table, the 31B's QAT 4-bit has 96.7% top-1 agreement with its reference and a mean KLD of 0.014, and
 Unsloth says more bits of these weights don't help. The 26B's QAT 4-bit agrees on only 85.6%, so the 26B runs at Q8_0.
@@ -968,7 +1029,50 @@ cut-off coding answers room.
 **Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): 21 of 25, coding 3 of 7, 744 minutes. Two more coding answers were still
 thinking when they reached the 128K context.
 
-## 11. Inkling 2 Small (maya-ink, branch `inkling2`, both cards)
+## 11. Ripple-65B Preview (llama.cpp, both cards)
+
+| | |
+|---|---|
+| Architecture | Dense, 65B (Ricursive, 2026-11-04, Apache 2.0). 80 layers: 64 sliding-window (1,024) and 16 global without positional encoding, so only 16 keep the whole context (~4.6 GB per 128K at q8_0). Gated attention, value residuals, FFN activation clamp. Text only |
+| Quant | AtomicChat AD-IQ4_XS, 38.7 GB: 95.6% top-1 and KLD 0.0149 in their table, level with their AD-Q4_K_M (95.9%, 40.4 GB) for 1.7 GB less |
+| Engine | llama.cpp b12314 built from source with ggml-org/llama.cpp#31904 (+7 lines) for Ricursive's DFlash2 drafter; mainline has run Ripple since b12167 (#31692) |
+| Placement | Layer split 65:35 over the 5090 and the 3090; the drafter (Q4_0, 2.3 GB) on the 3090, beside the output head it shares. 29.8 / 21.6 GB |
+| Context | 192K (1M natively); VRAM sets it |
+| Thinking | The model decides when to `<think>`; the template has no switch and no levels. Easy prompts often get none |
+| Works | Tools and `tool_choice: "required"` (Hermes-style `<tool_call>` JSON). `response_format` doesn't: the grammar forbids the `<think>` Ripple opens with, and the answer comes back empty |
+
+Ricursive publishes no sampling; it ran at 0.6 / 0.95.
+
+**Splits and drafter** (`ripple.ps1`: a standalone `llama-server`, 192K unless noted), tok/s:
+
+| | Layer 57:43 (llama.cpp's own) | Layer 70:30 | `-sm tensor` 65:35 | Layer 65:35 + DFlash2 (in use) |
+|---|---|---|---|---|
+| Decode, thinking on, 0.6 (`spec-sweep.py`) | 26.4 | 28.5 | 40.5-40.6 | 40.3, 44.4 |
+| Decode, new prompts, greedy (`ab.py`) | 26.6 | | 40.8 | **50.5** (code 78-114, prose 31-37) |
+| Decode after a 32K prompt | 22.7 | | 35.2 | **44.8** |
+| Prefill, 32K | 1,313 | | 1,091 | **1,331** |
+| Repeated code prompt | 26.6 | | 40.4 | **71.6** |
+
+- `-sm tensor` (experimental) has both cards read their share of every layer at once and sums through host memory: 50%
+  faster than the layer split without a drafter. 70:30 gave 41.4, 60:40 35.8; 75:25 doesn't fit; `-sm row` won't load.
+- The drafter can't join the tensor split (it doesn't fit beside the model on the 5090, and on the 3090 the split backend
+  asserts on its feature reads), so the choice is tensor split without a drafter or layer split with one. On code the
+  drafter wins by up to 2.8x; on prose it loses (31-37 against 40). With thinking on, 15-19% of drafted tokens are
+  accepted, and 8 drafted beat 4 (34.2) and 12 (36.7). Sampled drafts beat greedy ones (40.3 against 38.3).
+- Not faster: ik_llama.cpp (Ripple since 2026-11-06) falls back from `-sm graph` to the layer split for this
+  architecture and allocates the whole context for all 80 layers, so 192K didn't fit. ExLlamaV3 runs Ripple only from a
+  community branch (`feat/ricursive`), at ~20 tok/s on four 3090s by its author's numbers; not tried. Strata and Project
+  Maya don't have it.
+
+**Checks.** `glm-test.py` (on the tensor split): tools 5/5, facts 8/8, reasoning 5/8 (it answered most puzzles in
+20-100 tokens without thinking and missed the weekday, the reversed string and the letter count), code 2/3 (the
+calculator ran out of the test's 8K cap), the agent task in 5 turns and 46 s, `response_format` empty. `derail.py`: 0 of
+20 on both setups.
+
+**Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): 20 of 25, coding 4 of 7, 216 minutes, 657K tokens at 51 tok/s on
+average. The SAT solver was still thinking at the 192K context.
+
+## 12. Inkling 2 Small (maya-ink, branch `inkling2`, both cards)
 
 Thinking Machines' Inkling 2 Small (weights released 2026-11-12, Apache 2.0). Released only as NVFP4 (393 GB, the last
 8 layers' experts in MXFP8) and MXFP8 (623 GB). No GGUF existed and nothing here ran it, so the same day it was
