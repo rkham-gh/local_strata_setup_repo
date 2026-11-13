@@ -25,6 +25,7 @@ recorded.
 | Gemma 4 26B-A4B | 25.2B / 3.8B | Q8_0, 26.9 GB + 0.5 GB drafter | llama.cpp router | 224K | 318 tok/s | ~8,000 tok/s | a few GB |
 | Gemma 4 31B | 31B, dense | Google's QAT 4-bit as UD-Q4_K_XL, 17.3 GB + 0.3 GB drafter | llama.cpp router | 224K | 184 tok/s | ~2,550 tok/s | a few GB |
 | Inkling-Small | 276B / 12B | Unsloth UD-Q4_K_XL, 163 GB | maya-ink | 128K | 30.2 tok/s | 794 tok/s | ~164 GB (22 GB free) |
+| Inkling 2 Small | 594B / 17B | own 2-bit (IQ2_XXS / IQ2_XS / IQ2_S experts), 169.9 GB | maya-ink, branch `inkling2`, **both cards** | 128K | 32.5 tok/s | 836 tok/s | ~176 GB (16 GB free) |
 | Nemotron 3.5 Super VL | 120B / 12B | Unsloth UD-Q3_K_XL, 65.8 GB | maya-nem | 256K | 41.3 tok/s | ~1,970 tok/s | ~62 GB |
 | Nemotron 3.5 Super VL, Q4 | 120B / 12B | Unsloth UD-Q4_K_XL, 86.9 GB | maya-nem | 256K | 26.3 tok/s | 1,607 tok/s | ~84 GB |
 | Nemotron 3.5 Super VL, pictures | 120B / 12B | UD-Q4_K_XL + 1.7 GB picture encoder | llama.cpp router | 256K | 13.0 tok/s | ~474 tok/s | — |
@@ -40,6 +41,9 @@ Since 2026-11-12 DeepSeek uses both cards as well (Maya's expert helper and Deep
 and MiMo's prompt path was reworked (prefill 2.7x, an agent turn's first token after 3.5-5 s instead of 10: section
 3). Both are detailed in [two-gpu.md](two-gpu.md).
 
+Inkling 2 Small (section 11, released 2026-11-12) is measured on both cards, as it runs; its one-card figures are
+from its first build.
+
 ## Engines
 
 | Engine | Port | Serves | Notes |
@@ -52,8 +56,9 @@ and MiMo's prompt path was reworked (prefill 2.7x, an agent turn's first token a
 | maya-ink | 8084 | Inkling-Small | Custom engine in a Project Maya fork, branch `inkling` |
 | maya-nem | 8085 | Nemotron 3.5 Super VL | Same fork, branch `nemotron` |
 | maya-ling | 8086 | Ling-3.1-flash | Same fork, branch `ling` |
+| maya-ink, Inkling 2 port | 8089 | Inkling 2 Small | Same fork, branch `inkling2` (on `inkling-2gpu`) |
 
-- `switch-model.ps1` targets: `flash-next`, `glm`, `glm-m`, `mimo`, `deepseek`, `inkling`, `nemotron`, `nemotron-q4`,
+- `switch-model.ps1` targets: `flash-next`, `glm`, `glm-m`, `mimo`, `deepseek`, `inkling`, `inkling2`, `nemotron`, `nemotron-q4`,
   `ling`, `router`, `stop`, `status`. It applies each setup's tuned settings and refuses to stop a server in use (exit
   codes 0 done, 1 failed, 2 refused). Don't pipe its output: the server it starts inherits the pipe, and the caller
   hangs until that server stops.
@@ -962,3 +967,80 @@ cut-off coding answers room.
 
 **Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): 21 of 25, coding 3 of 7, 744 minutes. Two more coding answers were still
 thinking when they reached the 128K context.
+
+## 11. Inkling 2 Small (maya-ink, branch `inkling2`, both cards)
+
+Thinking Machines' Inkling 2 Small (weights released 2026-11-12, Apache 2.0). Released only as NVFP4 (393 GB, the last
+8 layers' experts in MXFP8) and MXFP8 (623 GB). No GGUF existed and nothing here ran it, so the same day it was
+converted to a 2-bit GGUF and ported to maya-ink (fork branch `inkling2`, on `inkling-2gpu`; `docs/INKLING2.md` there)
+and, as the check engine, to llama.cpp on top of PR #25731.
+
+| | |
+|---|---|
+| Architecture | MoE, 594B total, 17B active. 48 layers, all MoE: 384 routed experts (2,304 wide, top 8, sigmoid weights over their sum, times 8), no shared experts; SwiGLU softcapped, softcap(g, 4) * sigmoid(g) * softcap(u, 25). Width 4,608; 48 query heads and 8 KV heads of 128. Logits softcapped at 30. Vocabulary 201,024 |
+| Attention | No RoPE. 40 sliding-window layers (window 1,024) and 8 global ones (every sixth), with Inkling-Small's relative band. q and k L2-clipped, v RMS-normed per head, gated output, a sink logit per token and head. Block attention residuals: each layer's input is a learned softmax mix of the token's finished 6-layer blocks (three mixes on the global layers, for q, k and v). The global layers' k / v short convolutions are dynamic |
+| Input | Text and pictures; maya-ink reads text only |
+| Quant | Own, from the released weights. Experts: gate / up IQ2_XXS and down IQ2_XS in layers 0-39, IQ2_S throughout layers 40-47 (the release's MXFP8 ones), 162.6 GB, 2.2 bits on average. Attention, embedding, head Q8_0 (6.9 GB); router and small tensors F32. 169.9 GB. imatrix from a reference pass over 303K tokens |
+| Fidelity | Teacher-forced on 12,288 held-out positions against the released model's saved distributions: top-1 93.9%, 98.3% where the released model is over 50% sure, top-5 99.8%; perplexity 2.449 to 2.467 |
+| Launch | `switch-model.ps1 inkling2`, port 8089, model ID `inkling-2-small` |
+| Context | 128K; the model has 1M |
+| VRAM, RAM | 30.4 GB on the 5090, 23.4 GB on the 3090; ~176 GB of RAM in use, ~16 GB free |
+| Thinking | Effort as on Inkling-Small (`max` = 0.99 for hard work). The template has no `enable_thinking`: Maya's server maps it, `none` and `minimal` to effort 0, and at temperature 1 an answer can still open with a sentence of reasoning |
+| Sampling | Temperature 1.0, top-p 1.0 |
+| Works | Chat checks 6/6 (thinking apart, thinking off, a tool call, the answer from its result, streaming, JSON); `derail.py` 0/20 |
+
+**Why 2 bits.** The released experts need ~376 GB, more than the RAM and both cards hold (248 GB). Inkling-Small has
+10,240 experts, Inkling 2 18,432 of similar size, so even 4 bits (~330 GB of experts) doesn't fit. A probe in the
+reference pass measured each expert matrix's output error at each 2-bit type on real inputs: down erred about twice as
+much as gate / up in layers 0-39, and layer 40 about twice as much as layer 20 at every type, hence the mix (+5 GB for
+IQ2_S in 40-47).
+
+**Engine.** Inkling-Small's maya-ink (section 8) with the new layer. Inkling-Small's fused token kernels are off; the
+block mixes run in two wide launches a token. About 5,350 of the 18,432 experts fit on the two cards (29%; Inkling-Small
+31% of 10,240), and a token takes 8 instead of 6.
+
+**Speed** (`ab.py`, from the same expert profile each run; long prompt 41.2K tokens):
+
+| | llama.cpp port, experts in RAM, `-ub 128` | the same, `-ub 512`, 32 threads | maya-ink, 5090 alone, first build | maya-ink, both cards, first build | maya-ink, both cards (in use) |
+|---|---|---|---|---|---|
+| Decode, new prompts | 8.3 tok/s | 8.1 tok/s | 19.8 tok/s | 23.6 tok/s | **32.5 tok/s** (33.0-35.0 on a later day) |
+| Decode after the long prompt | 8.5 | 8.1 | 13.4 | 15.0 | **27.0** |
+| Prefill | 23 tok/s | 59 tok/s | 601 tok/s | 521 tok/s | **836 tok/s** |
+| TTFT | 1,778 s | 698 s | 69 s | 81 s | **50 s** |
+| Repeated prompt, 3rd | 8.8 | 8.4 | 22.3 | 28.6 | 38.6 |
+
+- **llama.cpp stays near 8 tok/s** whatever the layout: 10 layers' experts in the two cards' spare VRAM gave 8.2, and a
+  24-layer cut ran at 117 ms a token against the full model's 120, so most of its token time is a fixed cost (not
+  chased). Its attention materializes the scores with the per-token sinks as one more column; 512-token batches need a
+  15.5 GB compute buffer at 48K, its limit here.
+- **From 23.5 to 32.5 tok/s**, each step on both cards:
+  - the 3090 kept clocked ([two-gpu.md](two-gpu.md), "The 3090 itself"): 24.3 on `ab.py`'s short answers, teacher-forced
+    runs 23.1 / 26.0 to 28.3 / 27.7;
+  - `INK_TAIL_KEEP=5` (strata-mimo's `MIMO_TAIL_KEEP`): an expert neither card holds that ranks 6th-8th for the token is
+    left out with its weight, ~10% of a token's experts: 32.6. Top-1 against the released model on 6,144 positions 94.2%
+    to 93.9%, mean NLL delta 0.010 to 0.009, both within noise; Maya's weight rule at 8% gave 94.0%;
+  - `INK_CACHE_PROMPT=2`, 16K prompt chunks, the helper's refill after a prompt on its own thread
+    (`INK_HELPER_PROMPT_BG=1`): decode after the long prompt 18.8 to 27.0, TTFT 79 to 50 s, prefill +55%.
+- **Not adopted:** flushing the helper's launches (no gain); 8 or 16 helper swaps every 2 tokens, or a swap bar of 4,
+  which a routing replay predicted would cut CPU time 8-19%: 3 runs each, 16 swaps 33.9 / 26.5 against the defaults'
+  34.3 / 26.4. `ab.py`'s spread here is about 3%.
+- **A token (~30 ms):** the 5090's attention and its sync 12.2 ms (a layer's graph ~205 µs, ~30 small kernels),
+  launching both cards' experts 7.2 ms beside a ~12 ms CPU lane. The 5090's own path is now the larger share.
+- **Agent turns** (`turns.py`, 265 to 12,682 new tokens): first token 8.4-15.8 s. `INK_SNAPSHOT=1` keeps the
+  convolution states and sliding-window K/V at a prompt's end, so a turn reads only its new part (`--restore-check` 0 over
+  64 tokens on one card). A few hundred new tokens still take ~7 s: at 384 experts and top 8 they touch nearly every
+  expert, and the prompt path copies all the VRAM doesn't hold.
+
+**Checks.** On 4- and 7-layer cuts of the GGUF, maya-ink and the llama.cpp port both match a PyTorch reference running
+the GGUF itself at 12 of 12 positions; on the full model maya-ink picks llama.cpp's top token at 36 of 37.
+
+**Quirks.**
+
+- Inkling's tokenizer sets `ignore_merges` (a word whole in the vocabulary is one token). Maya's tokenizer and the
+  llama.cpp PR's pre-tokenizer didn't honor it: 3 of 159 test texts split differently. Fixed on both `inkling2`
+  branches. Inkling-Small's tokenizer has the same flag, so its setup has the same bug.
+- A healthy start logs the helper's keep-alive line, `2652 expert slots` on the helper, chunks of 16384 tokens and
+  `1410 expert slots` on the 5090.
+
+**Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): 22 of 25 at reasoning
+effort `max`, coding 4 of 7, 184 minutes.

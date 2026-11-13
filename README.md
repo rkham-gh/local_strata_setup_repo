@@ -2,7 +2,7 @@
 
 Optimized setups (Strata, Project Maya, Maya-based custom engines, tuned llama.cpp presets) against an unoptimized
 baseline, mostly stock llama.cpp, on one RTX 5090 + 192 GB box. Plus a 25-task hard test at each model's own settings,
-and what a second card (an RTX 3090, added 2026-11-11) buys each engine. Measured 2026-10-29 to 2026-11-12.
+and what a second card (an RTX 3090, added 2026-11-11) buys each engine. Measured 2026-10-29 to 2026-11-13.
 
 ## System
 
@@ -34,6 +34,9 @@ at the model's own sampling (`spec-sweep.py`), where drafting matters.
 | **Inkling-Small** UD-Q4_K_XL | llama.cpp PR #25731, `--cpu-moe` | 9.1 | 9.6 | 72 | 441 s |
 | | llama.cpp PR #25731, 14 GB expert cache, `-ub 2048` | 9.0 | 9.7 | 207 | 154 s |
 | | **maya-ink** | **30.2** | 26.3 | 794 | 40 s |
+| **Inkling 2 Small** own 2-bit, IQ2_XXS / XS / S experts, 169.9 GB (long prompt 41K) | own llama.cpp port on PR #25731, experts in RAM, `-ub 512` | 8.1 | 8.1 | 59 | 698 s |
+| | maya-ink port, the 5090 alone, first build | 19.8 | 13.4 | 601 | 69 s |
+| | **maya-ink port, both cards: 3090 kept clocked, `INK_TAIL_KEEP=5`, 16K chunks, `INK_CACHE_PROMPT=2`** | **32.5** | 27.0 | 836 | 50 s |
 | **Nemotron 3.5 Super** UD-Q4_K_XL | llama.cpp, `--cpu-moe` | 11.2 | 11.4 | 107 | 319 s |
 | | llama.cpp, own fit, `-ub 2048` | 13.0 | 13.5 | 474 | 72 s |
 | | **maya-nem** | **26.3** | 21.7 | 1,607 | 21 s |
@@ -66,7 +69,7 @@ engine isn't reproducible run to run, and code drafts far better than prose (90-
 `ab.py` runs gave 55-70.
 
 Engine notes:
-- **maya-ink, maya-nem, maya-ling** are engines in a Project Maya fork (branches `inkling`, `nemotron`, `ling`). They
+- **maya-ink, maya-nem, maya-ling** are engines in a Project Maya fork (branches `inkling`, `inkling2`, `nemotron`, `ling`). They
   share one design:
   - layer-at-a-time chunked prefill (8-16K tokens, one PCIe crossing per expert per chunk, own pinned staging);
   - an adaptive VRAM expert cache (decay 0.99/token, 16 swaps every 2 tokens) running beside a CPU expert lane;
@@ -91,12 +94,18 @@ against both cards, same build. Details, per-engine tables and checks: [`docs/tw
 | Nemotron 3.5 Super UD-Q3_K_XL | llama.cpp | 19.4 | 23.0 | | 25.7 | Device split |
 | | maya-nem | 41.0 | **48.2** | 33.9 | **43.8** | Helper card |
 | Inkling-Small UD-Q4_K_XL | maya-ink | 29.6 | **36.6** | 27.0 | 28.0 | Helper card |
+| Inkling 2 Small own 2-bit (long prompt 41K) | maya-ink, `inkling2`, first build | 19.8 | 23.6 | 13.4 | 15.0 | Helper card |
+| | the same, 3090 kept clocked + tail skip + prompt settings | | **32.5** | | **27.0** | Helper card |
 | Ling-3.1-flash IQ2_XS | maya-ling | 21.2 | **24.7** | 15.2 | 15.0 | Helper card |
 | MiMo-V2.6-Flash-MOPD MXFP4 | strata-mimo, patched | 24.5 | **36.0** | 20.0 | **29.0** | Helper card |
 
 - **Helper card:** the 3090 holds routed experts only, in a second expert cache. The 5090 still runs the whole model;
   a token's experts that it doesn't hold are split between the 3090 and the CPU lane. No model state leaves the first
   card, so prefill is unchanged (Ling excepted: 27% slower with two CUDA devices visible, cause open).
+- **Keep the 3090 clocked (2026-11-12).** A helper's work comes in bursts of tens of µs a layer, and the driver leaves
+  the 3090 in P3/P5 (420-1,260 MHz, memory at 5,001 or 810 MHz). Inkling 2's expert GEMVs took 180-280 µs there
+  against 15-23 on the 5090. A 50 ms sleeping kernel, launched again each token, holds it in P2. The other helper
+  engines haven't been re-checked for this ([`docs/two-gpu.md`](docs/two-gpu.md), "The 3090 itself").
 - **Layer splits cost prefill:** GLM and DeepSeek read prompts 40-47% slower on two cards. Flash-Next loses decode
   outright and stays on the 5090.
 - **DeepSeek (2026-11-12)** runs on Maya's own expert helper instead of the layer split, which keeps its prefill, with
@@ -120,6 +129,7 @@ results: [`docs/hard-test.md`](docs/hard-test.md).
 | Model | Score /25 | Coding /7 | Wall time | Tokens | Avg decode |
 |---|---|---|---|---|---|
 | Qwen3.8-Flash-Next IQ3_S | 22 | 4 | 51 min | 711K | 233 tok/s |
+| Inkling 2 Small own 2-bit (IQ2_XXS mix) | 22 | 4 | 184 min | 481K | 44 tok/s |
 | Inkling-Small UD-Q4_K_XL | 21 | 3 | 279 min | 671K | 40 tok/s |
 | Ling-3.1-flash IQ2_XS | 21 (2 cut off at 128K ctx) | 3 | 744 min | 992K | 22 tok/s |
 | Qwen3.8-Flash-Next UD-Q4_K_XL | 21 | 3 | 92 min | 830K | 150 tok/s |
@@ -137,12 +147,14 @@ results: [`docs/hard-test.md`](docs/hard-test.md).
 - **Budget:** at a flat 24K budget, GLM, Nanbeige and MiMo ran out on every coding task. With room, Nanbeige went from 9.8 to 18, and MiMo from 12.9 to 16.
 - **GLM effort:** GLM at `max` thinks past any budget; 10 of its 25 answers hit 131K. `high` and `low` with 262K solved five of those, plus the repair job, so for hard work use `high`, not GLM's default.
 - **MiMo checkpoints:** MiMo's MOPD checkpoint scores the same as RL, but codes better: 3 of 7 against 1. It runs at the same speed and writes 19% fewer tokens.
+- **Inkling 2 Small**, converted here to 2 bits from the release's NVFP4, ties Flash-Next at 22 and is the first run to pass both JSON and SAT. Two of its three misses are one-line bugs, and it wrote the fewest tokens of any run at 20 or more.
 
 How each model lost its points. Per miss, with patterns across models: [`docs/failure-modes.md`](docs/failure-modes.md).
 
 | Model | Misses | Mostly |
 |---|---|---|
 | Flash-Next IQ3_S | 3 | Runs of zeros that Strata's repeat guard stops early; one slow program |
+| Inkling 2 Small | 3 | Code only: lazy quantifiers ruled out of scope, a `continue` in the wrong loop, a solver stuck on the classic worst-case puzzle |
 | Inkling-Small | 4 | Code only: two too slow, two bugs |
 | Ling-3.1-flash | 4 | Code only: two still thinking at the 128K context, two bugs |
 | Flash-Next UD-Q4_K_XL | 4 | Code only: bugs, a slow program, a loop |

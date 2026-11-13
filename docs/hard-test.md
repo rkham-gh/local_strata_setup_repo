@@ -30,7 +30,7 @@ Per-task data for every run: [`../results/hard-test-tasks.csv`](../results/hard-
 thinking caps on. Strata ends thinking at 3/4 of `max_tokens`, which cut Flash-Next at 18K on 10 tasks. Maya closes
 thinking at 32,768 tokens.
 
-**At their best (2026-11-03 to 11-07):**
+**At their best (2026-11-03 to 11-13):**
 - each model at its card's sampling and top reasoning effort, with as much output as fits here;
 - engine thinking caps off: Maya run configs got `"thinking_budget": 0, "fit_max_tokens": true` for that start only;
 - `--loop-guard` on, and `--tool-thinking` on wherever the template replays reasoning inside a tool loop;
@@ -40,6 +40,7 @@ thinking at 32,768 tokens.
 |---|---|---|---|
 | Qwen3.8-Flash-Next IQ3_S (Strata) | 0.6 / top-p 0.95 | default | 262,144, trimmed to the context left. Only the 11 tasks the 24K round cut short were re-run |
 | Inkling-Small (maya-ink) | 1.0 / 1.0 | `max` (0.99) | to the 128K context. maya-ink has no thinking cap |
+| Inkling 2 Small own 2-bit (maya-ink's port, both cards, `INK_TAIL_KEEP=5`) | 1.0 / 1.0 | `max` (0.99) | to the 128K context |
 | Ling-3.1-flash (maya-ling) | 1.0 / 0.95 / top-k 20 | always on | to the 128K context |
 | Qwen3.8-27B (llama.cpp) | 1.0 / 0.95 / top-k 20 / min-p 0 | `xhigh` | to the 208K context |
 | DeepSeek-V4.1-Flash Coder (Maya) | 0.6 / 0.95 | `max` | 384,000, its listed maximum, in 1M |
@@ -54,6 +55,7 @@ thinking at 32,768 tokens.
 | Model | Strict | Lenient | Coding | Wall time | Tokens | Avg decode |
 |---|---|---|---|---|---|---|
 | Qwen3.8-Flash-Next IQ3_S | **22** | 22 | 4 | 51 min | 711K | 233 tok/s |
+| Inkling 2 Small own 2-bit (IQ2_XXS mix) | **22** | 22 | 4 | 184 min | 481K | 44 tok/s |
 | Inkling-Small UD-Q4_K_XL | **21** | 21 | 3 | 279 min | 671K | 40 tok/s |
 | Ling-3.1-flash IQ2_XS | **21** | 21 | 3 (+2 cut off at 128K) | 744 min | 992K | 22 tok/s |
 | Qwen3.8-Flash-Next UD-Q4_K_XL | **21** | 21 | 3 | 92 min | 830K | 150 tok/s |
@@ -70,7 +72,7 @@ thinking at 32,768 tokens.
 
 Average decode includes prefill time. It isn't the short-prompt decode in the README:
 - **Expert-caching engines get faster on long single-domain answers**, as the cache converges: Inkling 40 tok/s here
-  against 30 on `ab.py`.
+  against 30 on `ab.py`, Inkling 2 44 against 32.5.
 - **Dense models slow down with depth.** Nanbeige writes 69 tok/s on a new prompt and about 39 on its long coding
   answers.
 - **Drafting goes faster on long chains of thought.** DeepSeek's Maya engine decoded 55-62 tok/s through the test,
@@ -78,36 +80,36 @@ Average decode includes prefill time. It isn't the short-prompt decode in the RE
 
 Per task. Each cell is the verdict and the tokens written:
 
-| Task | Flash-Next IQ3_S | Inkling-Small | Ling-3.1-flash | Flash-Next Q4 | Qwen3.8-27B | DeepSeek Coder | Gemma 4 26B | Nanbeige4.3-33B | MiMo MOPD | MiMo RL | Gemma 4 31B | Nemotron Q3 | GLM (max, 131K) |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| trace-1 | ok 1.7K | ok 1.8K | ok 4.2K | ok 2.0K | ok 2.0K | ok 2.2K | ok 6.7K | ok 2.8K | ok* 2.0K | x 2.3K | ok 4.5K | ok 2.9K | ok 2.5K |
-| trace-2 | ok 6.4K | ok 11.1K | ok 10.9K | ok 5.5K | ok 7.4K | x 6.5K | ok 12.7K | ok* 7.6K | ok 3.6K | ok 4.5K | ok* 7.2K | ok 7.6K | ok 11.2K |
-| trace-3 | ok 5.7K | ok 17.5K | ok 17.9K | ok 6.8K | x 6.9K | ok 6.4K | ok 15.6K | ok 19.1K | x 13.7K | ok 6.5K | ok 8.1K | x 10.3K | ok 13.7K |
-| multiply-8d | ok 4.7K | ok 9.0K | ok 35.2K | ok 9.9K | ok 7.8K | ok 2.2K | ok 21.1K | ok 19.3K | ok 10.2K | ok 10.1K | ok 12.3K | ok 6.3K | ok 22.7K |
-| multiply-14d | ok 14.7K | ok 37.0K | ok 53.8K | ok 13.4K | ok 22.1K | ok 32.0K | ok 46.2K | ok 32.5K | ok 87.4K | ok 114.0K | ok 17.7K | ok 11.6K | len 131.1K |
-| multiply-20d | ok 11.8K | ok 32.4K | ok 28.2K | ok 17.9K | ok 32.9K | ok 22.2K | x 59.3K | ok 97.1K | ok 73.8K | ok 66.7K | x 23.2K | ok 20.5K | len 131.1K |
-| grid-4x3 | ok 1.3K | ok 3.5K | ok 1.1K | ok 1.4K | ok 1.5K | ok 1.2K | ok 5.9K | ok 1.4K | ok 1.8K | ok 1.5K | ok 2.3K | ok 2.4K | ok 4.1K |
-| grid-5x4 | ok 2.2K | ok 5.4K | ok 2.3K | ok 5.0K | ok 2.8K | ok 3.2K | ok 7.4K | ok 3.9K | ok 3.0K | ok 3.3K | ok 5.4K | ok 5.8K | ok 5.2K |
-| grid-6x4 | ok 15.9K | ok 22.3K | ok 16.0K | ok 17.9K | ok 12.8K | ok 13.7K | ok 15.4K | ok 19.5K | ok 34.1K | ok 18.5K | ok 8.9K | ok 25.4K | ok 39.5K |
-| tour-7 | ok 50.8K | ok 46.7K | ok 14.5K | ok 52.7K | ok 33.7K | ok 52.8K | ok 29.9K | ok 42.1K | ok 23.8K | ok 25.5K | ok 13.1K | ok 24.7K | ok 48.4K |
-| tour-9 | ok 62.8K | ok 62.8K | ok 95.8K | ok 68.9K | ok 60.3K | ok 120.6K | ok 34.3K | ok 70.1K | len 131.1K | len 131.1K | ok 14.0K | ok 53.7K | len 131.1K |
-| knapsack-16 | ok 62.8K | ok 43.9K | ok 35.3K | ok 63.1K | ok 36.3K | ok 41.6K | ok 25.7K | ok 65.4K | ok 81.5K | len 131.1K | ok 10.2K | ok 71.5K | len 131.1K |
-| follow-acrostic | ok 1.2K | ok 1.4K | ok 1.0K | ok 1.2K | ok 1.5K | ok 1.1K | ok 5.7K | ok 1.3K | x 0.8K | ok 1.0K | ok 2.1K | ok 1.4K | ok 1.4K |
-| follow-lipogram | ok 3.0K | ok 2.6K | ok 2.0K | ok 1.9K | ok 1.8K | ok 3.8K | ok 16.2K | ok 5.7K | ok 12.7K | ok 3.8K | ok 5.3K | ok 2.3K | ok 1.3K |
-| follow-words | ok 6.0K | ok 8.8K | ok 14.8K | ok 7.6K | loop 13.7K | ok 12.0K | x 8.8K | loop 15.3K | ok 19.7K | ok 9.2K | ok 3.7K | ok 6.7K | ok 4.0K |
-| long-table | ok 23.3K | ok 21.5K | ok 39.1K | ok 25.0K | ok 30.9K | ok 14.2K | ok 11.8K | x 34.5K | x 28.4K | ok 29.4K | ok 9.5K | ok 30.4K | ok 20.3K |
-| long-hops | ok 1.1K | ok 3.5K | ok 1.7K | ok 1.9K | ok 1.5K | ok 2.3K | ok 3.5K | ok 2.4K | ok 0.8K | ok 0.7K | ok 1.5K | ok 1.5K | ok 2.8K |
-| code-regex | ok 99.5K | x 37.5K | x 29.3K | ok 69.3K | x 61.6K | len 384.0K | loop 31.1K | ok 87.1K | ok 34.0K | x 56.1K | x 8.1K | x 24.7K | len 131.1K |
-| code-scheme | x 102.0K | ok 57.3K | ok 55.8K | x 109.2K | x 79.6K | x 20.0K | x 18.7K | x 87.9K | x 47.3K | x 49.9K | x 9.0K | x 38.9K | len 131.1K |
-| code-ordered | ok 35.1K | ok 30.1K | ok 85.0K | ok 102.5K | ok 60.4K | ok 10.7K | ok 8.6K | x 95.9K | ok 14.9K | ok 18.3K | ok 6.6K | x 9.0K | len 131.1K |
-| code-diff | ok 77.2K | ok 50.3K | len 130.9K | ok 79.6K | ok 82.0K | ok 186.1K | x 24.3K | ok 76.0K | ok 103.1K | len 131.1K | x 10.7K | x 24.4K | len 131.1K |
-| code-sudoku | len 2.2K | x 32.1K | len 131.0K | x 59.1K | ok 63.6K | x 58.3K | ok 8.6K | x 55.5K | x 31.6K | x 110.3K | x 1.6K | x 11.8K | len 131.1K |
-| code-json | len 16.0K | x 51.0K | ok 34.9K | len 4.6K | loop 40.9K | x 28.0K | x 12.9K | ok 46.0K | loop 31.4K | x 26.4K | x 7.5K | x 23.6K | x 89.6K |
-| code-sat | ok 86.5K | x 69.0K | x 125.9K | x 91.1K | ok 108.9K | x 96.6K | x 19.4K | x 80.3K | x 86.8K | x 130.6K | x 4.0K | x 48.1K | len 131.1K |
-| kitchen | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 0/10 |
-| **Strict** | **22** | **21** | **21** | **21** | **20** | **19** | **18** | **18** | **16** | **16** | **17** | **17** | **13** |
-| Lenient | 22 | 21 | 21 | 21 | 20 | 19 | 18 | 19 | 17 | 16 | 18 | 17 | 13 |
-| Minutes | 51 | 279 | 744 | 92 | 130 | 298 | 22 | 412 | 465 | 580 | 18 | 195 | 782 |
+| Task | Flash-Next IQ3_S | Inkling-Small | Ling-3.1-flash | Flash-Next Q4 | Qwen3.8-27B | DeepSeek Coder | Gemma 4 26B | Nanbeige4.3-33B | MiMo MOPD | MiMo RL | Gemma 4 31B | Nemotron Q3 | GLM (max, 131K) | Inkling 2 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| trace-1 | ok 1.7K | ok 1.8K | ok 4.2K | ok 2.0K | ok 2.0K | ok 2.2K | ok 6.7K | ok 2.8K | ok* 2.0K | x 2.3K | ok 4.5K | ok 2.9K | ok 2.5K | ok 1.4K |
+| trace-2 | ok 6.4K | ok 11.1K | ok 10.9K | ok 5.5K | ok 7.4K | x 6.5K | ok 12.7K | ok* 7.6K | ok 3.6K | ok 4.5K | ok* 7.2K | ok 7.6K | ok 11.2K | ok 7.8K |
+| trace-3 | ok 5.7K | ok 17.5K | ok 17.9K | ok 6.8K | x 6.9K | ok 6.4K | ok 15.6K | ok 19.1K | x 13.7K | ok 6.5K | ok 8.1K | x 10.3K | ok 13.7K | ok 8.1K |
+| multiply-8d | ok 4.7K | ok 9.0K | ok 35.2K | ok 9.9K | ok 7.8K | ok 2.2K | ok 21.1K | ok 19.3K | ok 10.2K | ok 10.1K | ok 12.3K | ok 6.3K | ok 22.7K | ok 2.6K |
+| multiply-14d | ok 14.7K | ok 37.0K | ok 53.8K | ok 13.4K | ok 22.1K | ok 32.0K | ok 46.2K | ok 32.5K | ok 87.4K | ok 114.0K | ok 17.7K | ok 11.6K | len 131.1K | ok 21.2K |
+| multiply-20d | ok 11.8K | ok 32.4K | ok 28.2K | ok 17.9K | ok 32.9K | ok 22.2K | x 59.3K | ok 97.1K | ok 73.8K | ok 66.7K | x 23.2K | ok 20.5K | len 131.1K | ok 40.5K |
+| grid-4x3 | ok 1.3K | ok 3.5K | ok 1.1K | ok 1.4K | ok 1.5K | ok 1.2K | ok 5.9K | ok 1.4K | ok 1.8K | ok 1.5K | ok 2.3K | ok 2.4K | ok 4.1K | ok 1.4K |
+| grid-5x4 | ok 2.2K | ok 5.4K | ok 2.3K | ok 5.0K | ok 2.8K | ok 3.2K | ok 7.4K | ok 3.9K | ok 3.0K | ok 3.3K | ok 5.4K | ok 5.8K | ok 5.2K | ok 3.7K |
+| grid-6x4 | ok 15.9K | ok 22.3K | ok 16.0K | ok 17.9K | ok 12.8K | ok 13.7K | ok 15.4K | ok 19.5K | ok 34.1K | ok 18.5K | ok 8.9K | ok 25.4K | ok 39.5K | ok 28.8K |
+| tour-7 | ok 50.8K | ok 46.7K | ok 14.5K | ok 52.7K | ok 33.7K | ok 52.8K | ok 29.9K | ok 42.1K | ok 23.8K | ok 25.5K | ok 13.1K | ok 24.7K | ok 48.4K | ok 31.7K |
+| tour-9 | ok 62.8K | ok 62.8K | ok 95.8K | ok 68.9K | ok 60.3K | ok 120.6K | ok 34.3K | ok 70.1K | len 131.1K | len 131.1K | ok 14.0K | ok 53.7K | len 131.1K | ok 68.0K |
+| knapsack-16 | ok 62.8K | ok 43.9K | ok 35.3K | ok 63.1K | ok 36.3K | ok 41.6K | ok 25.7K | ok 65.4K | ok 81.5K | len 131.1K | ok 10.2K | ok 71.5K | len 131.1K | ok 50.7K |
+| follow-acrostic | ok 1.2K | ok 1.4K | ok 1.0K | ok 1.2K | ok 1.5K | ok 1.1K | ok 5.7K | ok 1.3K | x 0.8K | ok 1.0K | ok 2.1K | ok 1.4K | ok 1.4K | ok 1.0K |
+| follow-lipogram | ok 3.0K | ok 2.6K | ok 2.0K | ok 1.9K | ok 1.8K | ok 3.8K | ok 16.2K | ok 5.7K | ok 12.7K | ok 3.8K | ok 5.3K | ok 2.3K | ok 1.3K | ok 4.3K |
+| follow-words | ok 6.0K | ok 8.8K | ok 14.8K | ok 7.6K | loop 13.7K | ok 12.0K | x 8.8K | loop 15.3K | ok 19.7K | ok 9.2K | ok 3.7K | ok 6.7K | ok 4.0K | ok 5.0K |
+| long-table | ok 23.3K | ok 21.5K | ok 39.1K | ok 25.0K | ok 30.9K | ok 14.2K | ok 11.8K | x 34.5K | x 28.4K | ok 29.4K | ok 9.5K | ok 30.4K | ok 20.3K | ok 15.5K |
+| long-hops | ok 1.1K | ok 3.5K | ok 1.7K | ok 1.9K | ok 1.5K | ok 2.3K | ok 3.5K | ok 2.4K | ok 0.8K | ok 0.7K | ok 1.5K | ok 1.5K | ok 2.8K | ok 1.7K |
+| code-regex | ok 99.5K | x 37.5K | x 29.3K | ok 69.3K | x 61.6K | len 384.0K | loop 31.1K | ok 87.1K | ok 34.0K | x 56.1K | x 8.1K | x 24.7K | len 131.1K | x 21.6K |
+| code-scheme | x 102.0K | ok 57.3K | ok 55.8K | x 109.2K | x 79.6K | x 20.0K | x 18.7K | x 87.9K | x 47.3K | x 49.9K | x 9.0K | x 38.9K | len 131.1K | x 52.5K |
+| code-ordered | ok 35.1K | ok 30.1K | ok 85.0K | ok 102.5K | ok 60.4K | ok 10.7K | ok 8.6K | x 95.9K | ok 14.9K | ok 18.3K | ok 6.6K | x 9.0K | len 131.1K | ok 19.7K |
+| code-diff | ok 77.2K | ok 50.3K | len 130.9K | ok 79.6K | ok 82.0K | ok 186.1K | x 24.3K | ok 76.0K | ok 103.1K | len 131.1K | x 10.7K | x 24.4K | len 131.1K | ok 9.0K |
+| code-sudoku | len 2.2K | x 32.1K | len 131.0K | x 59.1K | ok 63.6K | x 58.3K | ok 8.6K | x 55.5K | x 31.6K | x 110.3K | x 1.6K | x 11.8K | len 131.1K | x 6.3K |
+| code-json | len 16.0K | x 51.0K | ok 34.9K | len 4.6K | loop 40.9K | x 28.0K | x 12.9K | ok 46.0K | loop 31.4K | x 26.4K | x 7.5K | x 23.6K | x 89.6K | ok 22.5K |
+| code-sat | ok 86.5K | x 69.0K | x 125.9K | x 91.1K | ok 108.9K | x 96.6K | x 19.4K | x 80.3K | x 86.8K | x 130.6K | x 4.0K | x 48.1K | len 131.1K | ok 48.2K |
+| kitchen | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 10/10 | 0/10 | 10/10 |
+| **Strict** | **22** | **21** | **21** | **21** | **20** | **19** | **18** | **18** | **16** | **16** | **17** | **17** | **13** | **22** |
+| Lenient | 22 | 21 | 21 | 21 | 20 | 19 | 18 | 19 | 17 | 16 | 18 | 17 | 13 | 22 |
+| Minutes | 51 | 279 | 744 | 92 | 130 | 298 | 22 | 412 | 465 | 580 | 18 | 195 | 782 | 184 |
 
 GLM's attempts on the 11 tasks it re-ran (`-`: not re-run at that level):
 
@@ -213,6 +215,8 @@ There's one row per run and task: the last one, as the scorer reads them. Answer
 | `mimo`, `mimo-max` | 24K round, and the last 3 tasks at 128K |
 | `deepseek-max`, `ds-coder-60k`, `deepseek-max-token-only` | At max settings, its coding at 60K, and a 2-task side check |
 | `qwen27b-max`, `gemma26b-q8-max`, `gemma31b-max`, `nemotron-q3-max`, `inkling-max`, `ling-max` | At their best |
+| `inkling2-max` | Inkling 2 Small at its best |
+| `inkling2-max-v0` | Its first 5 tasks on the first, slower build of the same engine (all right), before the run was paused for the speedups and restarted from task 1 |
 | `gemma31b-max-code-t06` | The 31B's coding at temperature 0.6 |
 
 Checker fixes along the way:

@@ -26,6 +26,7 @@ tasks flip between runs: Flash-Next IQ3_S's 262K re-runs gained two tasks over i
 | Model | Score | Format | Slip | Wrong | Bug | Slow | Loop | Out of room | Other | On misses |
 |---|---|---|---|---|---|---|---|---|---|---|
 | Qwen3.8-Flash-Next IQ3_S | 22 | | | | | 1 | 2 | | | 17% |
+| Inkling 2 Small | 22 | | | | 2 | 1 | | | | 17% |
 | Inkling-Small | 21 | | | | 2 | 2 | | | | 28% |
 | Ling-3.1-flash | 21 | | | | 2 | | | 2 (128K context) | | 42% |
 | Qwen3.8-Flash-Next UD-Q4_K_XL | 21 | | | | 2 | 1 | 1 | | | 32% |
@@ -50,6 +51,23 @@ of its tokens spent on misses is the lowest share of any run.
 - **Loop, JSON.** Listing number edge cases, it wrote `1E+1000…` until the same guard fired at 16K, in the 24K round.
   It wasn't re-run with room.
 - **Slow, Scheme.** It timed out on the hidden tests after 102K tokens.
+
+### Inkling 2 Small
+
+It got every non-coding task, plus JSON and SAT: the only run to pass both. All three misses are code, and the 17%
+of its tokens spent on them ties Flash-Next IQ3_S for the lowest. Its coding answers are short (median 21.6K tokens),
+and four still passed.
+- **Bug, regex.** Lazy quantifiers. Its thinking weighed `a*?` and ruled it out ("not required"), reading the
+  prompt's "the operators are greedy" as excluding them, so the parser rejects a second quantifier and `match`
+  returns False. 3 of 400 cases; with a `?` after a quantifier accepted and ignored, it passes all 400.
+- **Bug, Scheme.** `cond`'s tail call: a matching clause sets the expression to its last form and says `continue`,
+  but that `continue` is inside the loop over the clauses, so evaluation moves on to the next clause. A `cond` that
+  runs out of clauses returns nothing, displayed `()`. Its plan in the thinking had the same `expr = body[-1];
+  continue`. Fixing that one line passes the whole test.
+- **Slow, Sudoku.** After 6.3K tokens: bitmasks, naked and hidden singles, fewest candidates first. It solves 7 of
+  the 8 puzzles in 0.1 s together, but the sixth (`.....6....59.....82....8....45...`, the worst case in Norvig's
+  sudoku essay for this same method) ran past 20 s alone, and the 60 s run limit ended it.
+- **Repair.** 10/10 in 3.9 min, 8 turns, 17 tool calls, and it called `finish`, which Inkling-Small never did.
 
 ### Qwen3.8-Flash-Next UD-Q4_K_XL
 
@@ -244,6 +262,7 @@ ends them:
 |---|---|---|
 | Gemma 4 31B | 1 | 7.5K |
 | Gemma 4 26B-A4B | 2 | 18.7K |
+| Inkling 2 Small | 4 | 21.6K |
 | Nemotron Q3 | 0 | 24.4K |
 | MiMo MOPD | 3 | 34.0K |
 | Inkling-Small | 3 | 50.3K |
@@ -256,6 +275,8 @@ ends them:
 | Ling-3.1-flash | 3 | 85.0K |
 | GLM, `max` | 0 | 131.1K, the cap |
 
+Inkling 2 Small is the exception: four passes at a 21.6K median.
+
 **Loops.** Nine answers looped at their best, plus GLM's Sudoku at `high`.
 - **Runs of zeros (five).** Each came while the model pictured a huge number or a puzzle string: the JSON parser for
   both Flash-Next quants, Qwen3.8-27B and MOPD, and Flash-Next IQ3_S's Sudoku. The JSON prompt invites this by asking
@@ -265,12 +286,14 @@ ends them:
   384K (DeepSeek), and GLM's phrase cycle.
 
 **SAT.** Calling a satisfiable formula unsatisfiable was the most common single coding failure: Flash-Next Q4, Ling,
-both Gemmas, MOPD and GLM at `high` did it. Only Flash-Next IQ3_S and Qwen3.8-27B passed.
+both Gemmas, MOPD and GLM at `high` did it. Only Flash-Next IQ3_S, Qwen3.8-27B and Inkling 2 passed.
 
 **Sudoku.** Most failures were correct but slow. Five solvers took 14-33 s against a 10 s limit: Inkling, DeepSeek,
 Gemma 31B, MiMo RL and Nemotron. Flash-Next Q4's timed out. Only Qwen3.8-27B and Gemma 26B passed.
+Inkling 2's solved 7 of 8 in 0.1 s and stalled on the sixth, the classic worst case for propagation with
+fewest-candidates search.
 
-**JSON.** Only Ling and Nanbeige passed. Four parsers broke on `\u` escapes:
+**JSON.** Only Ling, Nanbeige and Inkling 2 passed. Four parsers broke on `\u` escapes:
 - Gemma 31B and Nemotron reject a lone surrogate, which `json.loads` accepts.
 - MiMo RL doesn't combine a surrogate pair.
 - Gemma 26B decodes `é` wrong.
@@ -279,7 +302,8 @@ Inkling rejected `1e400`.
 
 **Regex.** The hidden cases include stacked quantifiers such as `+?` and `*?`, which Python reads as lazy. For a
 whole-match yes/no, they act as `+` and `*`. Ling's parser rejects them, and both of Gemma 31B's wrong cases are of
-this kind.
+this kind. Inkling 2's rejects them by decision: its thinking took the prompt's "greedy" to rule them out, and they
+were its only 3 wrong cases of 400.
 
 **Format slips.** These are rare, and mostly in the traces:
 - `''` for an empty string (Gemma 31B, Nanbeige);
@@ -299,6 +323,7 @@ Every run at its best passed it 10/10 except GLM at `max`. They differ in how th
 |---|---|---|---|---|---|---|
 | Flash-Next IQ3_S (24K round) | 10/10 | 22 | 29 | yes | 17.1K | 90 s |
 | Inkling-Small | 10/10 | 24 | 24 | no | 12.4K | 408 s |
+| Inkling 2 Small | 10/10 | 8 | 17 | yes | 7.8K | 234 s |
 | Ling-3.1-flash | 10/10 | 6 | 20 | yes | 25.3K | 1,217 s |
 | Flash-Next Q4 (24K round) | 10/10 | 14 | 19 | yes | 12.8K | 107 s |
 | Qwen3.8-27B | 10/10 | 10 | 21 | yes | 15.1K | 131 s |
@@ -312,8 +337,9 @@ Every run at its best passed it 10/10 except GLM at `max`. They differ in how th
 | GLM, `max` | 0/10 | 2 | 0 | no | 262K | 6,982 s |
 | GLM, `high` re-run | 9/10 | 7 | 17 | yes | 13.3K | 402 s |
 
-- **Calls per turn.** The Gemmas and Inkling make one tool call per turn, Flash-Next about 1.3, and the rest 2-3.3.
-- **Inkling** never calls `finish`.
+- **Calls per turn.** The Gemmas and Inkling-Small make one tool call per turn, Flash-Next about 1.3, and the
+  rest 2-3.3 (Inkling 2: 2.1).
+- **Inkling-Small** never calls `finish`; Inkling 2 does.
 - **Nanbeige** thinks the most per turn.
 
 ## Under a 24K budget

@@ -19,6 +19,7 @@ noted.
 | Nemotron 3.5 Super UD-Q3_K_XL | llama.cpp b12017 | 19.4 | 23.0 | llama.cpp's device split |
 | | maya-nem | 41.0 | **48.2** | Helper card |
 | Inkling-Small UD-Q4_K_XL | maya-ink | 29.6 | **36.6** | Helper card |
+| Inkling 2 Small own 2-bit | maya-ink, `inkling2` | 19.8 | 23.6; **32.5** with the 3090 kept clocked, the tail skip and prompt settings | Helper card (2026-11-12, below) |
 | Ling-3.1-flash IQ2_XS | maya-ling | 21.2 | **24.7** | Helper card |
 | MiMo-V2.6-Flash-MOPD MXFP4 | strata-mimo, patched | 24.5 | **36.0** | Helper card. Prefill 2.7x faster since 2026-11-12 (below) |
 
@@ -107,6 +108,31 @@ prompt. Single runs unless a row lists more.
   so the net is small (31.4 against 30.6 tok/s on a 300-token answer), but the main thread no longer stalls.
 - **Deep barely gains.** After a long prompt both caches hold what the prompt used and few swaps follow for some
   hundred tokens. The refill of the helper after a 32K prompt adds 4.6 s to TTFT.
+
+### maya-ink, `inkling2` (Inkling 2 Small, own 2-bit, 128K)
+
+Added 2026-11-12 ([models.md](models.md), Inkling 2 Small). Long prompt 41.2K tokens.
+
+| | 5090 alone, first build | Helper card, first build | Helper card, in use |
+|---|---|---|---|
+| Decode, new prompts | 19.8 | 23.6 | **32.5** |
+| Deep (41.2K prompt) | 13.4 | 15.0 | **27.0** |
+| Prefill | 601 (TTFT 69 s) | 521 (81 s) | **836 (50 s)** |
+| Repeated prompt, 3rd | 22.3 | 28.6 | 38.6 |
+
+- 5,353 expert slots on the two cards: 2,701 on the 5090 (1,410 of its own, 811 in the prompt path's buffers, 480 in
+  K/V rows) and 2,652 on the 3090, 29% of 18,432; a token takes 8.
+- "In use" is the 3090 kept clocked (below), `INK_TAIL_KEEP=5`, `INK_CACHE_PROMPT=2`, 16K chunks and the helper's
+  refill after a prompt on its own thread (`INK_HELPER_PROMPT_BG=1`). The first build refilled the helper on the
+  token's thread, hence its slower prefill than one card.
+- **Keeping the 3090 clocked** gained little on `ab.py`'s short answers (23.5 to 24.3) and more on long ones
+  (teacher-forced 23.1 / 26.0 to 28.3 / 27.7). The tail skip then drops experts that neither card holds, which are the
+  CPU lane's.
+- **Swap rate:** a routing replay predicted 8-19% less CPU time from 8 or 16 helper swaps every 2 tokens instead of 4.
+  With the 3090 clocked, 3 runs each: 16 swaps 33.9 / 26.5 tok/s against the defaults' 34.3 / 26.4; 8 swaps and a bar
+  of 4 stayed inside the defaults' spread. Before the keep-alive, 16 swaps at bar 0.5 lost 6% after the long prompt.
+- A token (~30 ms): the 5090's attention and its sync 12.2 ms, both cards' expert launches 7.2 ms beside a ~12 ms CPU
+  lane.
 
 ### maya-ling (Ling-3.1-flash, IQ2_XS, 128K)
 
@@ -288,6 +314,16 @@ Power limit sweep with Gemma 4 31B QAT on the 3090 alone (llama.cpp, decode):
 320 W is in use, with +100 MHz on the core: 42.3 tok/s and 489 per Wh (290 W with the offset: 39.7 and 497). As a
 helper card it draws far less: 60-80 W on average while working, against 145-170 W for the 5090 and ~100 W for the
 CPU. Peak temperatures across all of these runs: 69 C on the 5090, 61 C on the 3090.
+
+**It idles under helper work.** A helper's work comes in bursts of tens of µs a layer, and the driver keeps the 3090
+in P3/P5: 420-1,260 MHz, its memory at 5,001 or 810 MHz of 9,751. In an Nsight Systems profile of Inkling 2 the
+3090's IQ2 expert GEMVs took 180-280 µs against 15-23 µs on the 5090, and each token waited ~5 ms for it. maya-ink's
+`inkling2` branch now keeps a one-warp kernel asleep for 50 ms (`__nanosleep` against `%globaltimer`) on a
+lowest-priority non-blocking stream of the 3090, launched again each token once the last one has ended: the card
+stays in P2 (2,100 / 9,501 MHz) while tokens are written and falls back when they stop, and the wait drops to
+~0.6 ms. A kernel that never ends hangs the first token, since some call waits for all of a card's work. NVIDIA's
+"Prefer maximum performance" or a clock lock would cover every engine at once. Inkling-Small, Nemotron, Ling, MiMo
+and DeepSeek haven't been checked for it yet, so their helper-card numbers above may be low.
 
 ## Pitfall: check the link after touching the slots
 
