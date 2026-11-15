@@ -2,7 +2,10 @@
 
 Optimized setups (Strata, Project Maya, Maya-based custom engines, tuned llama.cpp presets) against an unoptimized
 baseline, mostly stock llama.cpp, on one RTX 5090 + 192 GB box. Plus a 25-task hard test at each model's own settings,
-and what a second card (an RTX 3090, added 2026-11-11) buys each engine. Measured 2026-10-29 to 2026-11-13.
+and what a second card (an RTX 3090, added 2026-11-11) buys each engine. Measured 2026-10-29 to 2026-11-15.
+
+**RAM speed:** DDR5-3600 until 2026-11-15, DDR5-4400 since. Every number here is a DDR5-3600 figure unless it says
+DDR5-4400; [RAM at DDR5-4400](#ram-at-ddr5-4400-2026-11-15) has each model at both.
 
 ## System
 
@@ -11,19 +14,19 @@ and what a second card (an RTX 3090, added 2026-11-11) buys each engine. Measure
 | CPU | Ryzen 9 9950X (16C/32T) |
 | Board | ASUS ProArt X870E-Creator WiFi |
 | GPU | RTX 5090 FE 32 GB, 450 W limit, driver 617.42 |
-| Second GPU | RTX 3090 24 GB, 320 W limit, since 2026-11-11. Used only in the "Second GPU" section |
+| Second GPU | RTX 3090 24 GB, 320 W limit, since 2026-11-11. Rows that use it say so |
 | PCIe | 5090: Gen5 **x8**, 28.7 GB/s H2D pinned. 3090: Gen4 x8, 13.3 GB/s |
-| RAM | 192 GB DDR5 (2x32 + 2x64), rated 5600, **running 3600 MT/s**. The CPU expert lanes see 37-50 GB/s |
-| OS / stack | Windows 11 Pro 26300, CUDA 13.4, llama.cpp b12017 (Ripple-65B: b12314, CUDA 13.5), Strata 0.2.10 (engine 0.1.56), Project Maya v1.1.52 |
+| RAM | 192 GB DDR5 (2x32 + 2x64), rated 5600, no ECC. **4400 MT/s since 2026-11-15**; 3600 before, AMD's rating for four dual-rank sticks. At 3600 the CPU expert lanes saw 37-50 GB/s |
+| OS / stack | Windows 11 Pro 26300, CUDA 13.4, llama.cpp b12017 (Ripple-65B: b12314, CUDA 13.5), Strata 0.2.10 (engine 0.1.56), Project Maya v1.1.52 (v1.1.60 since 2026-11-11) |
 
 The big MoEs here are RAM-bandwidth-bound on decode and PCIe-bound on prefill, so expect higher numbers on DDR5-5600+
-and x16.
+and x16. 3600 to 4400 made the ones that compute experts from RAM 4-15% faster on decode.
 
 ## Throughput: baseline vs optimized
 
-`ab.py` (greedy, thinking off): decode on six unseen prompts, prefill and TTFT on an unseen ~33K-token prompt. Runs on
-expert-caching engines start from the same saved expert profile, 3+ runs each. Rows marked † are decode with thinking on
-at the model's own sampling (`spec-sweep.py`), where drafting matters.
+`ab.py` (greedy, thinking off) at DDR5-3600: decode on six unseen prompts, prefill and TTFT on an unseen ~33K-token
+prompt. Runs on expert-caching engines start from the same saved expert profile, 3+ runs each. Rows marked † are decode
+with thinking on at the model's own sampling (`spec-sweep.py`), where drafting matters.
 
 | Model, quant | Setup | Decode tok/s | Decode after 33K | Prefill tok/s | TTFT at 33K |
 |---|---|---|---|---|---|
@@ -98,13 +101,16 @@ Engine notes:
 
 ## Second GPU
 
-An RTX 3090 beside the 5090, 2026-11-11. `ab.py` decode on new prompts and right after the ~33K prompt, the 5090 alone
-against both cards, same build. Details, per-engine tables and checks: [`docs/two-gpu.md`](docs/two-gpu.md).
+An RTX 3090 beside the 5090, 2026-11-11 to 2026-11-13, DDR5-3600 (Flash-Next again at 4400 on 2026-11-15). `ab.py`
+decode on new prompts and right after the ~33K prompt, the 5090 alone against both cards, same build. Details,
+per-engine tables and checks: [`docs/two-gpu.md`](docs/two-gpu.md).
 
 | Model, quant | Engine | Decode: 5090 alone | Both cards | After 33K: alone | Both | Second card's role |
 |---|---|---|---|---|---|---|
 | Qwen3.8-Flash-Next IQ3_S | Strata 0.2.10 | **227** | 193 | | | Layer split |
-| GLM-5.3-Flash Maya-S24 | Project Maya | 36-38 | **52.6** | | | Layer split, MTP on |
+| | Strata 0.2.10, DDR5-4400 (2026-11-15) | **233** | 145-207 | **211-214** | 131-194 | Peer tier, helper cache, plain helper cache |
+| GLM-5.3-Flash Maya-S24 | Project Maya | 36-38 | 52.6 | | | Layer split, MTP on |
+| | Maya v1.1.60, fork build (`glm-2gpu`) | 36.7 | **58-61** | 32.8 | **47.5-50.3** | Maya's expert helper, 3090 kept clocked (2026-11-13) |
 | DeepSeek-V4.1-Flash Coder IQ2_XXS | Maya (ds4) | 33.1 | 47.5 | | | Layer split |
 | | Maya (ds4), fork build | 36.5 | **66** | 32.3 | **60-65** | Maya's expert helper + DSpark drafter (2026-11-12) |
 | Nemotron 3.5 Super UD-Q3_K_XL | llama.cpp | 19.4 | 23.0 | | 25.7 | Device split |
@@ -121,11 +127,20 @@ against both cards, same build. Details, per-engine tables and checks: [`docs/tw
   card, so prefill is unchanged (Ling excepted: 27% slower with two CUDA devices visible, cause open).
 - **Keep the 3090 clocked (2026-11-12).** A helper's work comes in bursts of tens of µs a layer, and the driver leaves
   the 3090 in P3/P5 (420-1,260 MHz, memory at 5,001 or 810 MHz). Inkling 2's expert GEMVs took 180-280 µs there
-  against 15-23 on the 5090. A 50 ms sleeping kernel, launched again each token, holds it in P2. The other helper
-  engines haven't been re-checked for this ([`docs/two-gpu.md`](docs/two-gpu.md), "The 3090 itself").
-- **Layer splits cost prefill:** GLM and DeepSeek read prompts 40-47% slower on two cards. Flash-Next loses decode
-  outright and stays on the 5090; Strata's peer tier and helper cache lose too (196-202 against 217 tok/s), because
-  its 5090 cache already hits 94-98% and each layer then waits on the 3090 through host memory.
+  against 15-23 on the 5090. A 50 ms sleeping kernel, launched again each token, holds it in P2. Since 2026-11-13
+  every helper engine has it behind a switch: +5-12% on new prompts for 83-106 W more on the two cards while writing,
+  so it's off by default except on GLM, where it makes the helper worth having (41.1 to 59.4 tok/s). Per engine:
+  [`docs/two-gpu.md`](docs/two-gpu.md), "The 3090 itself".
+- **Layer splits cost prefill:** GLM and DeepSeek read prompts 40-47% slower with Maya's layer split. Both moved to
+  Maya's expert helper, which keeps one card's prefill (DeepSeek 2026-11-12, GLM 2026-11-13).
+- **Flash-Next stays on the 5090 (why: 2026-11-15).** Every Strata two-card mode loses decode: at DDR5-4400, 233 tok/s
+  alone against 204 on the peer tier, 207 on the helper cache and 145 on the plain helper cache. The 5090's adaptive
+  cache already does 95.5% of the expert work from VRAM, and each layer the 3090 joins is a round trip through host
+  memory that the 5090 waits for: the plain helper gave the 3090 3.8% of the work and still took a verify window from
+  12.7 to 20.0 ms. Details: [`docs/two-gpu.md`](docs/two-gpu.md), "Flash-Next".
+- **GLM (2026-11-13)** runs Maya's expert helper from a fork build: the 3090 holds 3,301 more experts (22 GB). With the
+  3090 left in P5 (memory at 810 MHz) the helper gained 12%; kept clocked, 58-61 tok/s against 36.7 alone and 51.9 on
+  the layer split, at one card's prefill.
 - **DeepSeek (2026-11-12)** runs on Maya's own expert helper instead of the layer split, which keeps its prefill, with
   DeepSeek's DSpark drafter on top: 36.5 to 66 tok/s on new prompts, 48 to 110 on a repeated prompt. The helper needed
   two fixes to answer on Windows.
@@ -137,12 +152,51 @@ against both cards, same build. Details, per-engine tables and checks: [`docs/tw
 - Outputs checked on every helper build: top-1 against llama.cpp 87/88, 86/88 and 90/90 on maya-nem, maya-ink and
   maya-ling, `derail.py` 0/20 on all four.
 
+## RAM at DDR5-4400 (2026-11-15)
+
+The kit went from DDR5-3600 to 4400 in the BIOS; higher settings gave an error. 1.10 V, no ECC, not stability-tested.
+One `ab.py` run per model at 4400, each started exactly as its latest DDR5-3600 rows (same build, settings, cards and
+saved expert profile), so the RAM is the only difference. 3600: the mean of those rows, their range in brackets. Helper
+engines as served: the 3090 kept clocked on GLM only.
+
+| Model | Weights in | New prompts, 3600 → 4400 tok/s | Change | After the ~33K prompt | Prefill, that prompt | Repeat, 3rd | Same greedy text |
+|---|---|---|---|---|---|---|---|
+| Qwen3.8-Flash-Next IQ3_S, Strata | 5090 + RAM | 224.0 (223.0-225.3) → **235.6** | **+5.2%** | 209.3 → 210.1 | 5,459 → 5,497 | 346 → 365 | varied at 3600 |
+| GLM-5.3-Flash Maya-S24, expert helper | both cards + RAM | 58.5 (58.0-58.9) → **63.5** | **+8.6%** | 48.1 → 52.6 | 2,891 → 2,891 | 63.8 → 67.1 | varied at 3600 |
+| DeepSeek-V4.1-Flash Coder IQ2_XXS, expert helper + DSpark | both cards + RAM | 69.7 → **74.2** | +6.5% | 65.8 → 69.9 | 1,879 → 2,364 ¹ | 114 → 122 | no; varies run to run |
+| MiMo-V2.6-Flash-MOPD, 1st run after a start | both cards + RAM | 35.1 (34.6-35.6) → **40.5** | **+15.4%** | 28.1 → 32.0 | 2,594 → 2,656 | 47.5 → 54.6 | yes |
+| MiMo, 2nd run | both cards + RAM | 36.3 (35.9-36.7) → **40.7** | **+12.1%** | 28.4 → 32.3 | 2,881 → 2,856 | 47.6 → 53.6 | varied at 3600 |
+| Inkling-Small UD-Q4_K_XL | both cards + RAM | 37.0 (36.9-37.2) → **40.6** | **+9.6%** | 28.7 → 33.3 ³ | 727 → 821 | 47.8 → 50.8 | yes |
+| Inkling 2 Small own 2-bit | both cards + RAM | 30.9 (30.4-31.3) → **33.5** | **+8.6%** | 26.5 → 29.0 | 844 → 931 | 34.9 → 36.4 | yes |
+| Nemotron 3.5 Super UD-Q3_K_XL | both cards + RAM | 56.5 (56.4-56.5) → **58.6** | **+3.8%** | 57.5 → 58.5 | 1,656 → 1,738 | 58.0 → 59.7 | yes |
+| Ripple-65B Preview AD-IQ4_XS | both cards | 50.5 → 51.2 | +1.4% | 44.8 → 46.7 | 1,331 → 1,365 | 71.0 → 71.6 | yes |
+| Qwen3.8-27B Q6_K | 5090 | 165.7 → 162.6 | -1.9% | 110.4 → 99.6 ² | 2,374 → 2,480 | 205 → 205 | no |
+| Nanbeige4.3-33B Q4_K_M | 5090 | 68.1 → 68.2 | +0.1% | 37.7 → 37.9 | 2,048 → 2,063 | 986 → 972 | yes |
+| Gemma 4 26B-A4B Q8_0 | 5090 | 318.3 → 312.1 | -1.9% | 222.3 → 219.4 | 8,041 → 7,916 | 357 → 349 | yes |
+| Gemma 4 31B QAT | 5090 | 183.7 → 183.0 | -0.4% | 103.7 → 102.7 | 2,539 → 2,542 | 196 → 196 | yes |
+
+- **The engines that compute experts from RAM: +4-15% on new prompts** for 22% more bandwidth. MiMo most (the CPU
+  still computes about a third of its routed experts), then Inkling-Small, Inkling 2 and GLM (9-10%), DeepSeek 6.5%
+  (inside its ±10% run-to-run spread), Flash-Next 5%, Nemotron 4%.
+- **Prefill:** +10-13% on both Inklings, whose prompt path copies experts from RAM, +5% on Nemotron, nothing measurable
+  elsewhere. ¹ DeepSeek's isn't the RAM: its one 3600 row on the served config read slower than the test configs
+  (~3,150).
+- **Held in VRAM, no change** (-1.9% to +1.4%: noise). ² Qwen3.8-27B's drafter met a different text after the long
+  prompt. ³ Inkling-Small's +16% there is inside its 3600 spread (24.6 and 32.7).
+- **Flash-Next: +5% on new and repeated prompts, +0.4% after the long one.** A new chat starts with a VRAM cache not
+  yet adapted to it, so more of its experts go to the CPU pool; after 35K tokens the cache holds what the answer needs.
+  The pool's time per expert went from 59-63 to 46-50 µs.
+- **Same greedy text** as at 3600 on 8 of 13 runs. The other five are engines whose text varied between 3600 runs
+  already, or with one 3600 row (Qwen3.8-27B).
+- Not run: Ling-3.1-flash, MiniMax-M3.1-Flash, GLM's exact Maya-M and Nemotron's UD-Q4_K_XL; their files are no longer
+  on this PC.
+
 ## Hard test
 
 25 seeded tasks (traces, long multiplication, logic grids, routing and knapsack, constrained writing, a 200-row table, a
 52K-token retrieval chain, 7 programs against hidden tests, a 7-file tool-driven repair). Each model ran at its card's
-sampling and top reasoning effort, with thinking caps off and as much output as the box allows. Details and per-task
-results: [`docs/hard-test.md`](docs/hard-test.md).
+sampling and top reasoning effort, with thinking caps off and as much output as the box allows. All at DDR5-3600.
+Details and per-task results: [`docs/hard-test.md`](docs/hard-test.md).
 
 | Model | Score /25 | Coding /7 | Wall time | Tokens | Avg decode |
 |---|---|---|---|---|---|
@@ -193,7 +247,7 @@ How each model lost its points. Per miss, with patterns across models: [`docs/fa
 | [`docs/models.md`](docs/models.md) | Per model: architecture, quant choice, launch settings, env, speeds, memory, correctness vs llama.cpp, quirks |
 | [`docs/hard-test.md`](docs/hard-test.md) | Tasks, scoring, each model's settings, per-task matrix |
 | [`docs/failure-modes.md`](docs/failure-modes.md) | Every miss by type and cause, patterns across models, tool use in the repair job, the 24K budget |
-| [`docs/two-gpu.md`](docs/two-gpu.md) | RTX 3090 as a second card: per-engine one-card vs two-card tables, the helper-card design, checks, DeepSeek's expert helper and drafter, MiMo's prompt path, the 3090's power sweep |
+| [`docs/two-gpu.md`](docs/two-gpu.md) | RTX 3090 as a second card: per-engine one-card vs two-card tables, the helper-card design, checks, why Flash-Next stays on one card, DeepSeek's and GLM's expert helpers, MiMo's prompt path, the 3090's power sweep and keep-alive |
 | [`docs/pinned-memory.md`](docs/pinned-memory.md) | Pinned host memory on Windows with two cards: copy rates, the commit limit, pinning a file mapping in place |
 | [`docs/measuring.md`](docs/measuring.md) | Measurement method (`ab.py`, `spec-sweep.py`, `turns.py`) and pitfalls |
 | [`results/hard-test-tasks.csv`](results/hard-test-tasks.csv) | Per-task verdicts, tokens and times for every run |

@@ -10,7 +10,8 @@ before starting the next. Default: Qwen3.8-Flash-Next on Strata.
 ## Summary
 
 Decode: `ab.py` on new prompts. Prefill: `ab.py`'s long prompt, 32-39K tokens depending on the tokenizer. "—": not
-recorded.
+recorded. Every speed in this file is at DDR5-3600; the README's
+[RAM at DDR5-4400](../README.md#ram-at-ddr5-4400-2026-11-15) has each model at 4400 as well (2026-11-15).
 
 | Model | Total / active parameters | Quant, size | Engine | Context | Decode, new prompts | Prefill | RAM in use |
 |---|---|---|---|---|---|---|---|
@@ -40,7 +41,9 @@ Everything in this file is on the RTX 5090 alone, except Ripple-65B (section 11)
 
 Since 2026-11-12 DeepSeek uses both cards as well (Maya's expert helper and DeepSeek's drafter, 66 tok/s: section 4),
 and MiMo's prompt path was reworked (prefill 2.7x, an agent turn's first token after 3.5-5 s instead of 10: section
-3). Both are detailed in [two-gpu.md](two-gpu.md).
+3). Both are detailed in [two-gpu.md](two-gpu.md). Since 2026-11-13 GLM uses both cards too (Maya's expert helper on a
+fork build, the 3090 kept clocked: 58-61 tok/s, section 2). Flash-Next stays on the 5090: every Strata two-card mode is
+slower, for reasons in [two-gpu.md](two-gpu.md).
 
 Inkling 2 Small (section 12, released 2026-11-12) is measured on both cards, as it runs; its one-card figures are
 from its first build.
@@ -213,6 +216,10 @@ against 223.5 and 226.0). `ab.py`, tok/s:
   won't reinstall it without `--force`; `strata components use 0.1.56 --family deepseek` resets the DeepSeek engine.
   Afterwards: 225.3 on new prompts, 273.6 on `match.py`.
 
+**DDR5-4400 (2026-11-15):** 235.6 on new prompts (+5%), 210 after the long prompt (+0.4%), prefill 5,497. **Two
+cards:** Strata's layer split, peer tier, helper cache and plain helper cache all decode slower than the 5090 alone
+(233 against 145-207 at 4400); why: [two-gpu.md](two-gpu.md), "Flash-Next".
+
 **Checks.** Quality suite: facts 8/8, logic 8/8, tools 5/5, a chart read correctly, the 3 coding tasks at `high` in
 16-36 s each, the agent bug-fix task in 9.9 s. `derail.py`: 0 of 20 derailed on 0.1.54 and again on 0.2.10.
 
@@ -256,6 +263,10 @@ Strata doesn't run GLM.
 | Exact setup | `switch-model.ps1 glm-m`: Maya-M (116 GB), no expert skips, config `maya-maya-m.json`, 29.6 GB of VRAM, 92-94 GB of RAM |
 | Thinking | Default `max`, so set a level on every request: `low` for quick work, `high` for careful work (allow up to 15 minutes a task) |
 | Works | Tools, pictures; JSON under quirks |
+
+**Both cards since 2026-11-13:** `maya-maya-s24.json` runs a fork build of v1.1.60 with Maya's expert helper on the
+3090 and the 3090 kept clocked, 58-61 tok/s on new prompts at one card's prefill ([two-gpu.md](two-gpu.md), "GLM").
+The rest of this section is the 5090 alone.
 
 Without skips GLM is RAM-bound. Maya-S24's smaller experts fit more in VRAM than Maya-M's, and two skips leave out the
 lightest experts the GPU doesn't hold. Maya's docs put Maya-S24's next token at the original's 83% of the time (Maya-M

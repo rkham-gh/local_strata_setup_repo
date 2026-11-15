@@ -1,7 +1,8 @@
 # Hard test
 
 25 tasks generated from fixed seeds, so every model gets identical, unseen problems. Code scores every answer.
-Per-task data for every run: [`../results/hard-test-tasks.csv`](../results/hard-test-tasks.csv).
+Per-task data for every run: [`../results/hard-test-tasks.csv`](../results/hard-test-tasks.csv). All runs were at
+DDR5-3600, before the RAM went to 4400 on 2026-11-15.
 
 | Group | Tasks | Check |
 |---|---|---|

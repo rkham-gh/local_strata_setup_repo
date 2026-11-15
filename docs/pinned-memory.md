@@ -1,8 +1,8 @@
 # Pinned host memory on Windows, with two cards
 
 Measured 2026-11-12 on the system in [`../README.md`](../README.md): RTX 5090 (PCIe 5.0 x8) + RTX 3090 (4.0 x8), 192 GB
-of RAM, Windows 11 (WDDM), CUDA 13.4, a 12 GB system-managed page file, so a commit limit of 201.6 GiB. Three small
-CUDA programs did the measuring; the numbers are this box's.
+of RAM at DDR5-3600, Windows 11 (WDDM), CUDA 13.4, a 12 GB system-managed page file, so a commit limit of 201.6 GiB.
+Three small CUDA programs did the measuring; the numbers are this box's.
 
 Engines that keep most of a MoE's experts in RAM copy them to a card while reading a prompt and when their expert
 cache changes. Whether the source is pinned decides the rate, and on Windows how much can be pinned is not a matter of
@@ -64,8 +64,9 @@ as an opt-in, capped at 60 GiB.
 ## Related measurements
 
 - **RAM traffic is shared.** CPU expert reads and DMA copies to a card run on the same memory bus: together about
-  35 GB/s on this DDR5-3600, where the CPU lane alone sees 37-50 and the 5090's link alone 28.8. A prompt path that has
-  the CPU compute some experts while the card copies others gains less than the sum.
+  35 GB/s on this DDR5-3600 (4400 since 2026-11-15, not re-measured), where the CPU lane alone sees 37-50 and the
+  5090's link alone 28.8. A prompt path that has the CPU compute some experts while the card copies others gains less
+  than the sum.
 - **Soft faults are slow in bulk.** Touching 150 GiB of a mapped file that is already in the file cache, on 16 threads,
   ran at 2.4-2.8 GB/s. `PrefetchVirtualMemory` in 256 MiB pieces brought 41 GiB back from the SSD in 8-11 s.
 - **A pinned copy pushes the rest of the file out of the cache.** After strata-mimo copied 34 layers, the 13 it reads

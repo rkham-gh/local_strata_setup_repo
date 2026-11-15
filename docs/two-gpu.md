@@ -1,8 +1,9 @@
 # Second GPU: an RTX 3090 beside the RTX 5090
 
-Measured 2026-11-11. The 3090 (24 GB, PCIe 4.0 x8) went in as GPU 1; the 5090 stays GPU 0 (PCIe 5.0 x8) and
-`CUDA_DEVICE_ORDER=PCI_BUS_ID` keeps the numbering. Everything else is the system in [`../README.md`](../README.md).
-Methods: [measuring.md](measuring.md).
+Measured 2026-11-11 to 2026-11-15. The 3090 (24 GB, PCIe 4.0 x8) went in as GPU 1; the 5090 stays GPU 0 (PCIe 5.0
+x8) and `CUDA_DEVICE_ORDER=PCI_BUS_ID` keeps the numbering. Everything else is the system in
+[`../README.md`](../README.md). The RAM ran at DDR5-3600 until 2026-11-15, so every number here is a 3600 figure unless
+it says DDR5-4400. Methods: [measuring.md](measuring.md).
 
 ## Summary
 
@@ -11,8 +12,9 @@ noted.
 
 | Model, quant | Engine | 5090 alone | Both cards | What the second card does |
 |---|---|---|---|---|
-| Qwen3.8-Flash-Next IQ3_S | Strata 0.2.10 | **217-227** | 193-202 | Strata's layer split, peer tier or helper cache: all slower (below) |
-| GLM-5.3-Flash Maya-S24 | Project Maya v1.1.52 | 36-38 | **52.6** | Maya's layer split; MTP drafting comes on with two cards |
+| Qwen3.8-Flash-Next IQ3_S | Strata 0.2.10 | **217-227** (233 at DDR5-4400) | 193-202 (145-207 at 4400) | Strata's layer split, peer tier or helper cache: all slower, and why (below) |
+| GLM-5.3-Flash Maya-S24 | Project Maya v1.1.52 | 36-38 | 52.6 | Maya's layer split; MTP drafting comes on with two cards |
+| | Maya v1.1.60, fork build (`glm-2gpu`) | 36.7 | **58-61** | Maya's expert helper, the 3090 kept clocked (2026-11-13, below) |
 | DeepSeek-V4.1-Flash Coder IQ2_XXS | Maya (ds4) | 33.1 | 47.5 | Maya's layer split |
 | | Maya (ds4), fork build | 36.5 | **66** | Maya's expert helper + DeepSeek's DSpark drafter (2026-11-12, below) |
 | MiniMax-M3.1-Flash Maya-S | Maya (mm3) | 12.7 | **16.9** | Maya's layer split |
@@ -27,10 +29,11 @@ noted.
 
 - **Flash-Next gets slower.** It already fits the 5090 well enough to decode 227 tok/s. Strata's Windows build has
   only the layer split (the all-cards split engine is Linux-only), and a split at layer 44 was worse still (158).
-  Strata's two ways of keeping extra experts on a second card were tried on 2026-11-12 and lose too (next section).
+  Strata's three ways of keeping extra experts on a second card lose too: the 5090 alone already does 95.5% of the
+  expert work from VRAM, and each layer the 3090 joins costs a round trip through host memory (section "Flash-Next").
 - **Maya's layer split trades prefill for decode.** GLM and DeepSeek read prompts 40-47% slower on two cards. DeepSeek's
-  first start on two cards decoded 40.1; the second 47.5. Since 2026-11-12 DeepSeek runs on Maya's expert helper
-  instead, which keeps its prefill (below).
+  first start on two cards decoded 40.1; the second 47.5. Since 2026-11-12 DeepSeek, and since 2026-11-13 GLM, run on
+  Maya's expert helper instead, which keeps their prefill (below).
 - **MiniMax** reads prompts at ~150 tok/s on one card or two. It isn't benchmarked beyond these two numbers.
 - **The helper card costs nothing on prefill** except on Ling (below).
 
@@ -189,24 +192,67 @@ made no difference.
   layer before the CPU's share could start.
 - Not run on two cards: the hard test, the quality suite, long-context recall.
 
-## Flash-Next: Strata's peer tier and helper cache
+## Flash-Next: Strata's second-card modes, and why they lose
 
-2026-11-12, Strata 0.2.10 (engine 0.1.56), IQ3_S, 256K, DFlash2 drafting, `strata serve --config` on a copy of the
-launch config with the engine flags added. `ab.py`, one run each unless noted.
+2026-11-12 at DDR5-3600, again on 2026-11-15 at 4400 with a fourth mode. Strata 0.2.10 (engine 0.1.56), IQ3_S, 256K,
+DFlash2 drafting, `strata serve --config` on a copy of the launch config with the engine flags added. `ab.py`, one
+run each unless a cell lists more. On 2026-11-15 `nvidia-smi` logged both cards every 200 ms, and the expert-work
+shares are from the engine's own per-request log.
 
-| | 5090 alone | `--peer-device 1` (2 runs) | `--expert-cache-device1 auto --remote-expert-opt` | Layer split |
-|---|---|---|---|---|
-| Decode, new prompts | **217.0** | 200.6, 196.2 | 201.6 | 192.7 |
-| Decode after a 35K prompt | **208.2** | 163.6, 161.0 | 137.3 | 143.4 |
-| Prefill, 35K | **5,399** | 3,846, 3,978 | 2,962 | 1,776 |
-| Repeated prompt, 1st / 3rd | **288 / 354** | 235-237 / 255-257 | 257 / 253 | 227 / 234 |
+| | 5090 alone | Peer tier, `--peer-device 1` | Helper cache, `--expert-cache-device1 auto --remote-expert-opt` | Plain helper cache, `--expert-cache-device1 auto` | Layer split |
+|---|---|---|---|---|---|
+| Decode, new prompts, 3600 | **217.0** | 200.6, 196.2 | 201.6 | | 192.7 |
+| Decode, new prompts, 4400 | **233.1, 233.3** | 203.7 | 206.6 | 145.0 | |
+| Decode after a 35K prompt, 3600 | **208.2** | 163.6, 161.0 | 137.3 | | 143.4 |
+| Decode after a 34K prompt, 4400 | **211.2, 214.2** | 193.9 | 131.4 | 150.4 | |
+| Prefill, 3600 | **5,399** | 3,846, 3,978 | 2,962 | | 1,776 |
+| Prefill, 4400 | **5,530, 5,568** | 3,881 | 3,268 | 3,271 | |
+| Repeated prompt, 1st / 3rd, 3600 | **288 / 354** | 235-237 / 255-257 | 257 / 253 | | 227 / 234 |
+| Repeated prompt, 1st / 3rd, 4400 | **297-299 / 362-363** | 250 / 265 | 256 / 260 | 177 / 235 | |
+| Expert work from the 5090's VRAM (4400) | **95.5%** | 70.4% | 67.5% | 92.9% | |
+| On the 3090 | none; 0.4% read over PCIe | 29.3% | 32.3% | 3.8% | |
+| CPU pool from RAM, or skipped | 4.1% | 0.3% | 0.2% | 3.3% | |
+| Host time a token preparing the 3090's work / waiting on it | | | 1.09 / 1.20 ms | 0.73 / 1.49 ms | |
+| The 3090 while the 5090 works (medians) | idle, P8 | P3 57%, P2 36% of the time; 1,170 MHz, memory 5,001 | P3 51%, P8 31%; 810 MHz | P8 66%, P5 34%; 345 MHz, memory 405 | |
 
-The 5090 alone holds 12,039 of 24,576 experts, and with fast re-balancing (`adapt-every 1`, `adapt-swaps 80`) its
-decode hit rate is 94-98% once a request warms up. The few misses go to the CPU and the PCIe upload beside the GPU.
-Both second-card modes move 11-45% of the routed experts to the 3090, and each MoE layer then waits on the 3090's
-result through host memory, since GeForce cards have no peer-to-peer: the helper log shows 0.25-1.1 s of waiting per
-request. `STRATA_ADAPT_OVERLAP` and `STRATA_PF_PEER_CPU` (0.2.12) weren't available on 0.2.10. Strata's own +28% for a
-5090 with a 4090 is measured against its plain helper path, not against one card at this hit rate.
+On 2026-11-15 the one-card run went first and last, 7 minutes apart: 233 both times. Why, from those logs and
+Strata's source at v0.2.10:
+
+- **The 5090 alone already does almost all the expert work from VRAM.** It holds 12,039 of 24,576 experts, and the
+  adaptive tier (`adapt-every 1`, `adapt-swaps 80`) swaps 3,000-7,000 in per request, so 95.5% of the expert work runs
+  from VRAM. The CPU pool computes ~4% beside the GPU (46-50 µs an expert at 4400, 59-63 at 3600), and the route tail
+  skip drops a few more. Half the model is in RAM by bytes, not by work, and that ~4.5% is all a second card could
+  take over.
+- **Each layer that touches the 3090 is a round trip the 5090 waits for.** No P2P on these GeForce cards, so the
+  3090's inputs and results go through pinned host memory, and the host thread waits for the 3090 before the 5090
+  goes on (`src/core/expert_source.cpp`, 5057-5066 and 5286-5295).
+  - The plain helper isolates it: 3.8% of the work on the 3090, the 5090's cache adapting as on one card, and still
+    38% slower. The count of round trips costs, not the work moved.
+  - A verify window took 20.0 ms against 12.7 on one card. The engine log puts 7.2 ms of it on the 3090, over ~25
+    layers a window: 2.4 ms preparing its work (0.09 ms a layer), 4.8 ms waiting on it (0.19 ms a layer).
+- **Taking the RAM work off the CPU doesn't pay it back.** On one card a decoding step (3.2 tokens) routes ~1,900
+  experts and misses ~79, one or two a layer, which the CPU pool reads from RAM (an expert is ~2 MB; 46-50 µs) while
+  the 5090 computes the rest. The peer tier and helper cache cut the misses to 4-7 a step, and a step still took
+  15.6-15.8 ms against 12.7: one trip to the 3090 (~0.28 ms a layer) costs about what the CPU spends on five or six
+  experts, and it sits on the 5090's critical path.
+- **The 3090 is the slower card, and idles between bursts.** 936 against 1,792 GB/s, and given work in bursts it
+  stays in P3-P8: under the plain helper its memory ran at 405 of 9,751 MHz. Strata's CUDA engine has no keep-alive
+  like the fork engines' ("The 3090 itself", below).
+- **The peer tier and helper cache strand the busiest experts on the 3090.** The 5090's adaptive tier promotes only
+  experts neither card holds (`src/program/generate.cpp`, 12502), so 29-32% of the work stays on the slower card.
+  - With a peer or `--remote-expert-opt` the asynchronous adaptive tier is refused (`generate.cpp`, 9779-9780).
+  - All three modes turn the route tail skip off (`expert_source.cpp`, 4947).
+  - Under WDDM a helper cache pins only 8 GiB of the 47 GiB expert arena (`STRATA_ARENA_PIN_GIB`).
+- **Strata's `docs/MULTI_GPU.md` (221-227) says as much:** a weak helper can slow decode when its per-layer round trip
+  costs more than the CPU pool would spend on those experts. No published two-card result has a primary at 94-97% hits
+  gaining decode, and the +28% for a 5090 with a 4090 is the helper cache against its plain path, not against one card.
+- **The engines that gain from the 3090 are the opposite case.** MiMo, Inkling, Nemotron, GLM and DeepSeek hold 12-27%
+  of their experts on the 5090, so the round trip replaces CPU work from RAM.
+- Not tried: holding the 3090 at full clocks for Strata (NVIDIA's "Prefer maximum performance" for that card, or a
+  clock lock). The fork engines' keep-alive gained them 5-12%; the same on the peer tier would give ~214-228, still
+  under 233. `STRATA_ADAPT_OVERLAP` and `STRATA_PF_PEER_CPU` (0.2.12) aren't in 0.2.10.
+
+So the 3090 is better spent on a second model that fits in its 24 GB while Flash-Next runs on the 5090.
 
 ## Ripple-65B: a dense model on both cards
 
@@ -289,6 +335,27 @@ use, against 2.9 / 4.3 / 2.5 / 2.8 / 3.3 / 4.8 on one card. On prompts the exper
   being 1/11 written as `\frac{1}{11}`, which the checker doesn't read; 4 of 4 answers in `content` at effort `max`.
 - The first long prompt after another model had the RAM reads in 14-18 s instead of 10.6: its experts come off the
   SSD. That was so on one card.
+
+## GLM: Maya's expert helper (2026-11-13)
+
+Maya-S24 on a fork build of Maya v1.1.60 (`glm-2gpu`, every change behind a switch). The 5090 runs every layer; the
+3090 holds 3,301 more experts (22 GB) and computes them when a token picks them: `MAYA_GLM_EXPERT_HELPER=1`,
+`MAYA_GLM_SPLIT=0`, with `MAYA_GLM_HELPER_KEEPALIVE=1` (below), `_OVERLAP=1` and `_ZEROCOPY=1`. `ab.py`:
+
+| | Decode, new prompts | After a 33K prompt | Prefill | Repeat, 3rd | Both cards while writing |
+|---|---|---|---|---|---|
+| 5090 alone | 36.7 | 32.8 | 2,944 | 39.4 | 239 W |
+| Maya's layer split, MTP drafting on | 51.9 | 43.0 | 1,834 | 54.7 | 476 W |
+| Expert helper | 41.1 | 33.8 | 2,897 | 46.9 | 276 W |
+| **+ the 3090 kept clocked (in use, 4 runs)** | **58.0-60.8** | **47.5-50.3** | **2,889-2,900** | **63.1-65.7** | ~440 W |
+
+- Without the keep-alive the 3090 sat in P5, memory at 810 MHz, and the helper was worth 12%. With it: +61% over one
+  card and +15% over the layer split at one card's prefill, for ~15% more energy a token (7.5 J against 6.5; the
+  layer split 9.2).
+- Checks: greedy picks matched the stock one-card engine's on 96.3% of 2,000 tokens, where the fork build on one card
+  matched 95.9%; tools 5/5, facts 8/8, reasoning 7/8 (the reversed string, missed on one card too); `derail.py` 0/20.
+- Overlap and zero-copy measured inside the noise. `MAYA_GLM_MTP_DECODE=1` (GLM's drafter on the 5090) hangs at the
+  first token with the helper, keep-alive or not; not chased.
 
 ## MiMo: the prompt path
 
@@ -391,8 +458,30 @@ in P3/P5: 420-1,260 MHz, its memory at 5,001 or 810 MHz of 9,751. In an Nsight S
 lowest-priority non-blocking stream of the 3090, launched again each token once the last one has ended: the card
 stays in P2 (2,100 / 9,501 MHz) while tokens are written and falls back when they stop, and the wait drops to
 ~0.6 ms. A kernel that never ends hangs the first token, since some call waits for all of a card's work. NVIDIA's
-"Prefer maximum performance" or a clock lock would cover every engine at once. Inkling-Small, Nemotron, Ling, MiMo
-and DeepSeek haven't been checked for it yet, so their helper-card numbers above may be low.
+"Prefer maximum performance" or a clock lock would cover every engine at once, but also holds the clocks at idle.
+
+**Every helper engine (2026-11-13).** The same kernel went into each helper engine behind a switch. `ab.py` on both
+cards, the same build with the switch off and on, 2 interleaved runs each from the same expert profile (MiMo: the
+warm second run of each start); power is both cards' median while the 5090 was busy:
+
+| Engine | Switch | Decode, new prompts, off → on | Repeat, 3rd | After a long prompt | Both cards while writing |
+|---|---|---|---|---|---|
+| GLM, Maya `glm-2gpu` (above) | `MAYA_GLM_HELPER_KEEPALIVE=1` | 41.1 → **59.4** (+45%) | 46.9 → 63.1 | 33.8 → 49.4 | 276 → ~440 W |
+| Inkling 2 Small, maya-ink `inkling2` | `INK_HELPER_KEEPALIVE=1` | 30.9 → 34.6 (+12%) | 34.9 → 41.2 | 26.5 → 28.1 | not logged |
+| Inkling-Small, maya-ink | `INK_HELPER_KEEPALIVE=1` | 37.0 → 39.6 (+7%) | 47.8 → 55.6 | 28.7 → 34.2 (noisy: 24.6 and 32.7 off) | 287 → 370 W |
+| Nemotron 3.5 Super, maya-nem | `NEM_HELPER_KEEPALIVE=1` | 56.5 → 62.5 (+11%) | 58.0 → 67.0 | 57.5 → 57.5 | 361 → 467 W |
+| MiMo-V2.6-Flash, strata-mimo | `MIMO_HELPER_KEEPALIVE=1` | 36.3 → 38.0 (+5%) | 47.7 → 50.0 | 28.5 → 28.2 | 275 → 359 W |
+| Ling-3.1-flash, maya-ling | `LING_HELPER_KEEPALIVE=1` | not measured | | | |
+| DeepSeek, maya-ds4 | none | its helper's waiting kernel already keeps the 3090 in P2 (86-88% busy) | | | |
+
+- Outside GLM it removes only the token's wait for the 3090, about a tenth of a token (Inkling-Small 2.5 of 27.8 ms,
+  Nemotron 1.8 of 18.1). Nemotron's, Inkling-Small's, Ling's and MiMo's helper gains above were measured at idle
+  clocks; Inkling 2's 32.5 was this kernel's first build, switched on.
+- It costs 17-25% more energy a token on the two cards (Inkling-Small 7.8 → 9.4 J, Nemotron 6.4 → 7.5, MiMo 7.6 →
+  9.5), nothing at idle. The 3090 does the same work at P2's clocks, ~180-200 W of its 320 W limit.
+- So it's on for GLM, where it decides whether the helper pays, and off by default elsewhere.
+- Same greedy `ab.py` text on and off. Chat 6/6 and `derail.py` 0/20 on Inkling-Small and Nemotron, `derail.py` 0/20
+  on MiMo.
 
 ## Pitfall: check the link after touching the slots
 
