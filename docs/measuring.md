@@ -69,9 +69,11 @@ engine sending 300-1,400-token turns through its slower prompt path ([two-gpu.md
   file out of the cache; a benchmark that started with a short turn then measured the SSD.
 - **An expert profile that hasn't seen a drafter picks the wrong drafter experts.** Prompts the profile never saw
   (`ab-heldout.py`) are the fair test of a setting that depends on the profile.
-- **The RAM speed changed on 2026-11-15** (DDR5-3600 to 4400), and engines that compute experts from RAM got 4-15%
-  faster. Compare a later run with an earlier one only through a re-run of the earlier setup
-  ([README](../README.md#ram-at-ddr5-4400-2026-11-15)).
+- **The RAM speed changed on 2026-11-15** (DDR5-3600 to 4400, then 4200 after 4400 failed a stress test), and engines
+  that compute experts from RAM got 4-15% faster (2-12% at 4200). Compare a later run with an earlier one only through a
+  re-run of the earlier setup ([README](../README.md#ram-speed-ddr5-4400-then-4200-2026-11-15)).
+- **Stress-test a RAM overclock before benchmarking on it.** There's no ECC, so errors are silent: 4400 ran all 13
+  `ab.py` runs without a visible error, then failed y-cruncher twice in 22 minutes.
 - **Watch a helper card's clocks while the main card works**, not at idle. Under bursty helper work the 3090 sat in
   P3-P8; `nvidia-smi --query-gpu=timestamp,index,pstate,clocks.sm,clocks.mem,utilization.gpu,power.draw
   --format=csv,noheader,nounits -lms 200 -f smi.csv` beside the run, read where the 5090's utilization is 50% or more,

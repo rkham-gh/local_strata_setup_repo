@@ -64,7 +64,7 @@ as an opt-in, capped at 60 GiB.
 ## Related measurements
 
 - **RAM traffic is shared.** CPU expert reads and DMA copies to a card run on the same memory bus: together about
-  35 GB/s on this DDR5-3600 (4400 since 2026-11-15, not re-measured), where the CPU lane alone sees 37-50 and the
+  35 GB/s on this DDR5-3600 (4200 since 2026-11-15, not re-measured), where the CPU lane alone sees 37-50 and the
   5090's link alone 28.8. A prompt path that has the CPU compute some experts while the card copies others gains less
   than the sum.
 - **Soft faults are slow in bulk.** Touching 150 GiB of a mapped file that is already in the file cache, on 16 threads,

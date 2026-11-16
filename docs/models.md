@@ -11,7 +11,8 @@ before starting the next. Default: Qwen3.8-Flash-Next on Strata.
 
 Decode: `ab.py` on new prompts. Prefill: `ab.py`'s long prompt, 32-39K tokens depending on the tokenizer. "—": not
 recorded. Every speed in this file is at DDR5-3600; the README's
-[RAM at DDR5-4400](../README.md#ram-at-ddr5-4400-2026-11-15) has each model at 4400 as well (2026-11-15).
+[RAM speed](../README.md#ram-speed-ddr5-4400-then-4200-2026-11-15) section has each model at 4400 and 4200 as well
+(2026-11-15).
 
 | Model | Total / active parameters | Quant, size | Engine | Context | Decode, new prompts | Prefill | RAM in use |
 |---|---|---|---|---|---|---|---|
@@ -216,9 +217,9 @@ against 223.5 and 226.0). `ab.py`, tok/s:
   won't reinstall it without `--force`; `strata components use 0.1.56 --family deepseek` resets the DeepSeek engine.
   Afterwards: 225.3 on new prompts, 273.6 on `match.py`.
 
-**DDR5-4400 (2026-11-15):** 235.6 on new prompts (+5%), 210 after the long prompt (+0.4%), prefill 5,497. **Two
-cards:** Strata's layer split, peer tier, helper cache and plain helper cache all decode slower than the 5090 alone
-(233 against 145-207 at 4400); why: [two-gpu.md](two-gpu.md), "Flash-Next".
+**DDR5-4400 (2026-11-15):** 235.6 on new prompts (+5%), 210 after the long prompt (+0.4%), prefill 5,497; DDR5-4200:
+237.2, 208.7, 5,451. **Two cards:** Strata's layer split, peer tier, helper cache and plain helper cache all decode
+slower than the 5090 alone (233 against 145-207 at 4400); why: [two-gpu.md](two-gpu.md), "Flash-Next".
 
 **Checks.** Quality suite: facts 8/8, logic 8/8, tools 5/5, a chart read correctly, the 3 coding tasks at `high` in
 16-36 s each, the agent bug-fix task in 9.9 s. `derail.py`: 0 of 20 derailed on 0.1.54 and again on 0.2.10.

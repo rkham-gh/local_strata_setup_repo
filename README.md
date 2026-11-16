@@ -4,8 +4,9 @@ Optimized setups (Strata, Project Maya, Maya-based custom engines, tuned llama.c
 baseline, mostly stock llama.cpp, on one RTX 5090 + 192 GB box. Plus a 25-task hard test at each model's own settings,
 and what a second card (an RTX 3090, added 2026-11-11) buys each engine. Measured 2026-10-29 to 2026-11-15.
 
-**RAM speed:** DDR5-3600 until 2026-11-15, DDR5-4400 since. Every number here is a DDR5-3600 figure unless it says
-DDR5-4400; [RAM at DDR5-4400](#ram-at-ddr5-4400-2026-11-15) has each model at both.
+**RAM speed:** DDR5-3600 until 2026-11-15, then 4400, which failed y-cruncher the same day, and DDR5-4200 since. Every
+number here is a DDR5-3600 figure unless it says 4400 or 4200;
+[RAM speed](#ram-speed-ddr5-4400-then-4200-2026-11-15) has each model at all three.
 
 ## System
 
@@ -16,11 +17,12 @@ DDR5-4400; [RAM at DDR5-4400](#ram-at-ddr5-4400-2026-11-15) has each model at bo
 | GPU | RTX 5090 FE 32 GB, 450 W limit, driver 617.42 |
 | Second GPU | RTX 3090 24 GB, 320 W limit, since 2026-11-11. Rows that use it say so |
 | PCIe | 5090: Gen5 **x8**, 28.7 GB/s H2D pinned. 3090: Gen4 x8, 13.3 GB/s |
-| RAM | 192 GB DDR5 (2x32 + 2x64), rated 5600, no ECC. **4400 MT/s since 2026-11-15**; 3600 before, AMD's rating for four dual-rank sticks. At 3600 the CPU expert lanes saw 37-50 GB/s |
+| RAM | 192 GB DDR5 (2x32 + 2x64), rated 5600, no ECC. **4200 MT/s since 2026-11-15** (4400 failed a stress test); 3600 before, AMD's rating for four dual-rank sticks. At 3600 the CPU expert lanes saw 37-50 GB/s |
 | OS / stack | Windows 11 Pro 26300, CUDA 13.4, llama.cpp b12017 (Ripple-65B: b12314, CUDA 13.5), Strata 0.2.10 (engine 0.1.56), Project Maya v1.1.52 (v1.1.60 since 2026-11-11) |
 
 The big MoEs here are RAM-bandwidth-bound on decode and PCIe-bound on prefill, so expect higher numbers on DDR5-5600+
-and x16. 3600 to 4400 made the ones that compute experts from RAM 4-15% faster on decode.
+and x16. 3600 to 4400 made the ones that compute experts from RAM 4-15% faster on decode; 4200 keeps all but 0-3% of
+that.
 
 ## Throughput: baseline vs optimized
 
@@ -152,9 +154,11 @@ per-engine tables and checks: [`docs/two-gpu.md`](docs/two-gpu.md).
 - Outputs checked on every helper build: top-1 against llama.cpp 87/88, 86/88 and 90/90 on maya-nem, maya-ink and
   maya-ling, `derail.py` 0/20 on all four.
 
-## RAM at DDR5-4400 (2026-11-15)
+## RAM speed: DDR5-4400, then 4200 (2026-11-15)
 
-The kit went from DDR5-3600 to 4400 in the BIOS; higher settings gave an error. 1.10 V, no ECC, not stability-tested.
+The kit went from DDR5-3600 to 4400 in the BIOS; higher settings gave an error. 1.10 V, no ECC. 4400 then failed
+y-cruncher, and 4200 at the same DRAM voltage passed ([below](#stability-4400-fails-4200-passes)), so the box runs at
+4200.
 One `ab.py` run per model at 4400, each started exactly as its latest DDR5-3600 rows (same build, settings, cards and
 saved expert profile), so the RAM is the only difference. 3600: the mean of those rows, their range in brackets. Helper
 engines as served: the 3090 kept clocked on GLM only.
@@ -190,6 +194,47 @@ engines as served: the 3090 kept clocked on GLM only.
   already, or with one 3600 row (Qwen3.8-27B).
 - Not run: Ling-3.1-flash, MiniMax-M3.1-Flash, GLM's exact Maya-M and Nemotron's UD-Q4_K_XL; their files are no longer
   on this PC.
+
+### Stability: 4400 fails, 4200 passes
+
+y-cruncher 0.8.7 stress test (Zen 5 binary), no engine running, stop on first error: each test alone for 2 min at
+4 GiB, then FFTv4 + N63 + VT3 at 160 GiB for an hour. DRAM at 1.10 V at both speeds (VDDSOC and the rest not read).
+WHEA logged nothing at either.
+
+| | DDR5-4400 | DDR5-4200 |
+|---|---|---|
+| 2-min runs at 4 GiB | 2 of 8 failed, both in the first second (FFTv4, and the in-cache SVT) | 7 of 7 passed |
+| FFTv4 + N63 + VT3 at 160 GiB | failed twice in N63, on both CCDs, the second after 15 clean minutes; 22 min in all | 60 min clean: 10 rounds, 29 tests |
+| N63 runs at 160 GiB | 2 of 4 failed | 10 of 10 passed |
+| Throughput at 160 GiB, FFTv4 / N63 / VT3 (10^9 bits/s) | 1.68 / 8.44 / 9.04 | 1.63 / 8.25 / 8.82 (2-3% lower) |
+
+- **The benchmarks didn't show it.** At 4400 all 13 `ab.py` runs finished without a visible error, and 8 gave the same
+  greedy text as at 3600 (the rest vary run to run or have one 3600 row), yet y-cruncher failed twice in 22 minutes.
+  Without ECC, stress-test first.
+- 4200 hasn't had a 12-hour run yet. 4400 at higher DRAM/VDDIO and VDDSOC is untried; by the numbers below it could buy
+  at most ~3%.
+
+### DDR5-4200
+
+The same 13 runs, started the same way. New prompts, tok/s:
+
+| Model | 3600 | 4400 | **4200** | vs 4400 | vs 3600 | After the ~33K prompt, 4400 → 4200 | Same text as 4400 |
+|---|---|---|---|---|---|---|---|
+| Qwen3.8-Flash-Next IQ3_S, Strata | 224.0 | 235.6 | **237.2** | +0.7% | +5.9% | 210.1 → 208.7 | no (varies) |
+| GLM-5.3-Flash Maya-S24, expert helper | 58.5 | 63.5 | **64.1** | +0.9% | +9.7% | 52.6 → 53.9 | yes |
+| DeepSeek-V4.1-Flash Coder IQ2_XXS | 69.7 | 74.2 | **71.4** | -3.8% | +2.4% | 69.9 → 64.6 | no (varies) |
+| MiMo-V2.6-Flash-MOPD, 1st run after a start | 35.1 | 40.5 | **39.2** | -3.2% | +11.7% | 32.0 → 30.3 | yes |
+| MiMo, 2nd run | 36.3 | 40.7 | **40.8** | +0.2% | +12.4% | 32.3 → 30.8 | no (varies) |
+| Inkling-Small UD-Q4_K_XL | 37.0 | 40.6 | **39.5** | -2.7% | +6.6% | 33.3 → 28.9 | yes |
+| Inkling 2 Small own 2-bit | 30.9 | 33.5 | **32.6** | -2.7% | +5.7% | 29.0 → 28.7 | yes |
+| Nemotron 3.5 Super UD-Q3_K_XL | 56.5 | 58.6 | **57.8** | -1.4% | +2.4% | 58.5 → 55.2 | yes |
+| Ripple-65B, Qwen3.8-27B, Nanbeige, both Gemmas (VRAM only) | | | | -0.1% to +0.1% | -2.1% to +1.4% | | yes |
+
+- **The engines that compute experts from RAM: 0-3% below 4400 on new prompts**, still +2-12% over 3600. Flash-Next and
+  GLM lost nothing (+0.7%, +0.9%: noise). DeepSeek's -3.8% is inside its ±10% run-to-run spread. About what y-cruncher
+  showed for a 4.5% lower clock.
+- **After the long prompt** MiMo lost 5% in both runs (3600: 27.8-28.5). Nemotron's 55.2 is below its 3600 runs too
+  (57.3-57.8), so likely noise; Inkling-Small's 28.9 is inside its 3600 spread (24.6-32.7).
 
 ## Hard test
 
