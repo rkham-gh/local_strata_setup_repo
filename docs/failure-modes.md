@@ -25,6 +25,7 @@ tasks flip between runs: Flash-Next IQ3_S's 262K re-runs gained two tasks over i
 
 | Model | Score | Format | Slip | Wrong | Bug | Slow | Loop | Out of room | Other | On misses |
 |---|---|---|---|---|---|---|---|---|---|---|
+| Hy4 Flash Q3_K | 24 | | | | 1 | | | | | 5% |
 | Qwen3.8-Flash-Next IQ3_S | 22 | | | | | 1 | 2 | | | 17% |
 | Inkling 2 Small | 22 | | | | 2 | 1 | | | | 17% |
 | Inkling-Small | 21 | | | | 2 | 2 | | | | 28% |
@@ -42,6 +43,19 @@ tasks flip between runs: Flash-Next IQ3_S's 262K re-runs gained two tasks over i
 | GLM-5.3-Flash, `max`, 131K | 13 | | | | 1 | | | 10 | 1 stall | 90% |
 
 ## By model
+
+### Hy4 Flash Q3_K
+
+It got every non-coding task and 6 of 7 coding tasks, among them Scheme, JSON and SAT, each in 22-41K tokens. Only
+5% of its output went to the miss.
+- **Bug, regex.** Off-by-one backreferences, which the prompt asks for. The parser numbers groups from 0 as it opens
+  them, but `\n` reads capture `n`, so every backreference points one group too far: even `(a)\1` on `aa` returns
+  False. 4 of the checker's 400 cases are wrong (the fixed `(a+)b\1`, `(x?)(y?)\2\1`, `((a)|b)+\2`, `(.)(.)\2\1`).
+  It also raises `ValueError: unexpected ?` on 9 random patterns that stack a second quantifier (`+?`, `++`, `*+`).
+  The prompt doesn't list those, and Python 3.12 reads them as lazy or possessive quantifiers. With them dropped it is
+  396 of 400, so the miss stands either way. The checker stops at the first case that raises, so its report showed
+  only that `ValueError`. Re-check the whole case list when you sort a miss.
+- **Repair.** 10/10 in 4.5 min, 13 turns, 25 tool calls, and it called `finish`.
 
 ### Qwen3.8-Flash-Next IQ3_S
 
@@ -280,6 +294,7 @@ ends them:
 | Gemma 4 31B | 1 | 7.5K |
 | Gemma 4 26B-A4B | 2 | 18.7K |
 | Inkling 2 Small | 4 | 21.6K |
+| Hy4 Flash | 6 | 22.2K |
 | Nemotron Q3 | 0 | 24.4K |
 | MiMo MOPD | 3 | 34.0K |
 | Inkling-Small | 3 | 50.3K |
@@ -292,7 +307,7 @@ ends them:
 | Ling-3.1-flash | 3 | 85.0K |
 | GLM, `max` | 0 | 131.1K, the cap |
 
-Inkling 2 Small is the exception: four passes at a 21.6K median.
+Inkling 2 Small and Hy4 Flash are the exceptions: four passes at a 21.6K median, and six at 22.2K.
 
 **Loops.** Nine answers looped at their best, plus GLM's Sudoku at `high`.
 - **Runs of zeros (five).** Each came while the model pictured a huge number or a puzzle string: the JSON parser for
@@ -341,6 +356,7 @@ Every run at its best passed it 10/10 except GLM at `max`. They differ in how th
 | Flash-Next IQ3_S (24K round) | 10/10 | 22 | 29 | yes | 17.1K | 90 s |
 | Inkling-Small | 10/10 | 24 | 24 | no | 12.4K | 408 s |
 | Inkling 2 Small | 10/10 | 8 | 17 | yes | 7.8K | 234 s |
+| Hy4 Flash | 10/10 | 13 | 25 | yes | 17.1K | 272 s |
 | Ling-3.1-flash | 10/10 | 6 | 20 | yes | 25.3K | 1,217 s |
 | Flash-Next Q4 (24K round) | 10/10 | 14 | 19 | yes | 12.8K | 107 s |
 | Qwen3.8-27B | 10/10 | 10 | 21 | yes | 15.1K | 131 s |

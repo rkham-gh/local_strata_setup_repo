@@ -33,6 +33,7 @@ recorded. Every speed in this file is at DDR5-3600; the README's
 | Nemotron 3.5 Super VL, pictures | 120B / 12B | UD-Q4_K_XL + 1.7 GB picture encoder | llama.cpp router | 256K | 13.0 tok/s | ~474 tok/s | — |
 | Ling-3.1-flash | 564B / 25B | bartowski IQ2_XS, 177.4 GB | maya-ling | 128K | 22.4 tok/s | 876 tok/s | ~160 GB (24 GB free) |
 | Ripple-65B Preview | 65B, dense | AtomicChat AD-IQ4_XS, 38.7 GB + 2.3 GB DFlash2 drafter | llama.cpp b12314 + #31904, **both cards** | 192K | 50.5 tok/s | ~1,330 tok/s | a few GB |
+| Hy4 Flash | 224B with a 63.4B Engram table | AngelSlim Q3_K, 144.7 GiB + 1.69 GB DFly2 drafter | maya-hy4, branch `hy4`, **both cards** | 128K | 66-71 tok/s (DDR5-4200) | ~1,900-2,000 tok/s (DDR5-4200) | ~140 GB (31-47 GB free) |
 
 Flash-Next's UD-Q4_K_XL was measured, then deleted; its numbers are in section 1.
 
@@ -62,6 +63,7 @@ from its first build.
 | maya-nem | 8085 | Nemotron 3.5 Super VL | Same fork, branch `nemotron` |
 | maya-ling | 8086 | Ling-3.1-flash | Same fork, branch `ling` |
 | maya-ink, Inkling 2 port | 8089 | Inkling 2 Small | Same fork, branch `inkling2` (on `inkling-2gpu`) |
+| maya-hy4 | 8092 | Hy4 Flash | Same fork, branch `hy4` (seeded from maya-ling) |
 
 - `switch-model.ps1` targets: `flash-next`, `glm`, `glm-m`, `mimo`, `deepseek`, `inkling`, `inkling2`, `nemotron`, `nemotron-q4`,
   `ling`, `router`, `stop`, `status`. It applies each setup's tuned settings and refuses to stop a server in use (exit
@@ -1160,3 +1162,54 @@ the GGUF itself at 12 of 12 positions; on the full model maya-ink picks llama.cp
 
 **Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): 22 of 25 at reasoning
 effort `max`, coding 4 of 7, 184 minutes.
+
+## 13. Hy4 Flash (maya-hy4, branch `hy4`, both cards)
+
+Tencent's Hy4 Flash (released 2026-11-17), text only. Nothing here ran it at speed: llama.cpp's open PR #32517 wrote
+17 tok/s. So it got its own engine, maya-hy4, in the same Project Maya fork (branch `hy4`, `src/hy4`, seeded from
+maya-ling). A second session reviewed every commit before the next one started. Everything in this section was
+measured at DDR5-4200 with both cards at their stock power limits (450 / 320 W).
+
+| | |
+|---|---|
+| Architecture | MoE, 224B with a 63.4B Engram n-gram table, 16 of 512 routed experts a token (latent 1,536). 42 layers: 30 sliding-window and 12 sparse ones with an indexer. 4 hyper-connection streams. Engram reads its table on layers 1, 11, 21 and 31 |
+| Quant | AngelSlim's Q3_K GGUF, 144.7 GiB (about level with Q4_K_M on their benchmarks). The output head is re-quantized to Q8_0 at load (KL 1.3e-5 nats against its BF16 head) |
+| Drafter | DFly2, Tencent's 5-layer drafter (the checkpoint's last shard, 1.69 GB, loaded as Q8_0), ported from vLLM PR 68296. It drafts 5 tokens a round, verified in one pass |
+| Launch | `switch-model.ps1 hy4`, port 8092, model ID `hy4-flash`, 131K context. Ready in ~78 s (pinned experts and the Engram table are read at start) |
+| VRAM, RAM | 5090 ~29.9 GB, 3090 ~22.5 GB (6,350 more experts). RAM: the routed experts (76.5 GB) pinned and the Engram table resident, ~140 GB in all; 31-47 GB stays free |
+| Thinking | `reasoning_effort` `none` (off), `high` (the model's default), `max` (`xhigh` maps to it) |
+| Sampling | Tencent's: temperature 0.9, top-p 1.0 |
+| Works | Agrees with llama.cpp's port on 216-221 of 224 top-1 tokens on short prompts (the misses are near-ties); `derail.py` 0/20; tools, JSON and streaming through Maya's server |
+
+**Speed** (`ab.py`, temperature 0, thinking off; capped):
+
+| | llama.cpp PR #32517 | Basalt 0.5.0 (5090 only) | maya-hy4, both cards |
+|---|---|---|---|
+| Decode, new prompts | 17.2 tok/s | 53.2 tok/s | **66-71 tok/s** |
+| Decode after a 33K prompt | 20.0 | 47.0 | **48-56** |
+| Prefill, 33K prompt | 185 tok/s | **3,020 tok/s (11.0 s)** | 1,900-2,000 tok/s (16.4-17.3 s) |
+| A repeated prompt | - | 55-57 | **81-90** |
+| `turns.py`, an agent conversation's six first tokens | - | 26.3 s | **21.2-22.0 s** |
+
+How it got there, in reviewed steps:
+- **Routing on the GPU.** The 5090 routes on device and the 3090 runs its experts from its own queue, so the host
+  runs only the CPU's share of experts.
+- **Pinned experts.** The routed experts are read into pinned memory at start, so every copy to a card is one DMA.
+- **A grouped prompt path.** Prompt experts are computed in batched GEMMs, and the 3090 computes the prompt's experts
+  it holds.
+- **Refill.** A background refill after each prompt, and short prompts read in windows of 6.
+- **Drafting.** DFly2 and prompt lookup verified in windows: code +31-38%, thinking +13%, prose +6% at Tencent's
+  sampling.
+- Writing stays at ~68 tok/s at any depth. The gap after a long prompt is ~100 slow tokens while the expert caches
+  refill.
+
+**Engram's epsilon.** Tencent's code leaves the Engram gate's two RMSNorms at torch's default epsilon. On a bf16 input
+that default is bf16's 0.0078125 only in torch 2.4-2.6; from 2.7 it is float32's 1.19e-7. vLLM, as merged with torch
+2.14, computes 1.19e-7 on all four Engram norms, as maya-hy4 and llama.cpp's port do. A published BF16 reference made
+with 0.0078125 agrees with maya-hy4 on only 75.7% of top-1 tokens (83.6% with that epsilon), but that agreement is
+circular. On text written after the model's release (25,245 tokens), float32's epsilon predicts better (perplexity
+28.55 against 32.57, the paired chunk interval clear of 0), so it stays. Run-to-run agreement of maya-hy4 with itself
+is 92.5% top-1: timing decides which card computes an expert.
+
+**Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): 24 of 25 at reasoning
+effort `max` with Tencent's sampling, coding 6 of 7, 68 minutes, 301K tokens: the best score here, from one run.
