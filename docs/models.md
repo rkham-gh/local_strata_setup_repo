@@ -34,6 +34,7 @@ recorded. Every speed in this file is at DDR5-3600; the README's
 | Ling-3.1-flash | 564B / 25B | bartowski IQ2_XS, 177.4 GB | maya-ling | 128K | 22.4 tok/s | 876 tok/s | ~160 GB (24 GB free) |
 | Ripple-65B Preview | 65B, dense | AtomicChat AD-IQ4_XS, 38.7 GB + 2.3 GB DFlash2 drafter | llama.cpp b12314 + #31904, **both cards** | 192K | 50.5 tok/s | ~1,330 tok/s | a few GB |
 | Hy4 Flash | 224B with a 63.4B Engram table | AngelSlim Q3_K, 144.7 GiB + 1.69 GB DFly2 drafter | maya-hy4, branch `hy4`, **both cards** | 128K | 66-71 tok/s (DDR5-4200) | ~1,900-2,000 tok/s (DDR5-4200) | ~140 GB (31-47 GB free) |
+| Inkling 2 Mini | 26.4B / 3.4B (a looped MoE: 48 layer passes from 24 layers) | ggml-org IQ4_NL, 17.6 GB | llama.cpp at #32694 (`29b52d3`), the 5090 alone | 128K (1M natively) | 91.2 tok/s (DDR5-4200) | 1,127 tok/s | a few GB |
 
 Flash-Next's UD-Q4_K_XL was measured, then deleted; its numbers are in section 1.
 
@@ -1213,3 +1214,48 @@ is 92.5% top-1: timing decides which card computes an expert.
 
 **Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): 24 of 25 at reasoning
 effort `max` with Tencent's sampling, coding 6 of 7, 68 minutes, 301K tokens: the best score here, from one run.
+
+## 14. Inkling 2 Mini (llama.cpp, the 5090 alone)
+
+Thinking Machines' Inkling 2 Mini (released 2026-11-20, Apache 2.0), text and pictures in. It's the smallest Inkling 2
+and the first looped model here: layers 6-17 of its 24 run three times for every token with the same weights, each
+pass with its own cache. Neither Project Maya nor Basalt had it, and the whole model fits in the 5090's VRAM, so it
+runs on llama.cpp, built from the commit that added it (ggml-org/llama.cpp#32694, `29b52d3`, merged that evening,
+before any release build had it). Measured at DDR5-4200 with both cards at their stock power limits (450 / 320 W).
+
+| | |
+|---|---|
+| Architecture | MoE, 26.4B total, 3.4B active (5.4B counting the loop's extra passes), 8 of 128 experts a token, no shared expert. Inkling 2's attention: block attention residuals, gated attention with a sink, a relative-position bias, 1,024-token windows on 20 of 24 layers |
+| Released as | One ~20 GB checkpoint, NVFP4 with MXFP8 for layers 20-23, plus a 3-layer DSpark block drafter |
+| Quant | ggml-org's IQ4_NL, 17.6 GB: imatrix 4-bit experts for layers 0-19, Q8_0 elsewhere, the loop controller F32. Theirs: KLD 0.0095 against BF16, top-1 95.5% (Q8_0: 0.0030, 97.6%). Q8_0 was measured too and wrote 9% slower, so IQ4_NL was kept |
+| Launch | `switch-model.ps1 inkling2-mini`, port 8093, model ID `inkling-2-mini`, 128K context, `-ub 256`, f16 cache, pictures on. Ready in ~10 s |
+| VRAM, RAM | 5090 ~28.1 GB; the 3090 and the RAM stay free |
+| Thinking | `reasoning_effort` `none` to `max` (0 to 0.99; `high` 0.9 is the default, `xhigh` and `max` 0.99). `enable_thinking` does nothing: the template reads only `reasoning_effort` |
+| Sampling | The card's: temperature 1.0, top-p 1.0 |
+| Works | Tools 4 of 5 (`tool_choice: "required"` isn't forced), `response_format`, pictures, facts 8 of 8, the agent bug-fix task in 5 turns; `derail.py` 0/20 |
+
+**Speed** (`ab.py`, temperature 0; the 5090 alone):
+
+| | 256K, `-ub 128`, q8_0 cache | **128K, `-ub 256`, f16 cache (served)** | 64K, `-ub 512`, q8_0 cache | Q8_0, 64K |
+|---|---|---|---|---|
+| Decode, new prompts | 89.4 tok/s | **91.2 tok/s** | 89.3 | 81.4 |
+| Decode after a 41K prompt | 78.4 | **79.2** | 78.8 | 72.9 |
+| Prefill, that prompt | 957 tok/s | **1,127 tok/s (37 s)** | 1,281 | 920 |
+| A repeated prompt | 88.5 | **90** | 89.1 | 81.5 |
+| VRAM | 27.8 GB | **28.1 GB** | 24.7 GB | 29.5 GB |
+
+`turns.py` on the served setup: first tokens after 0.41, 0.50, 0.95, 1.36, 3.49 and 10.4 s for 267 to 12,690 new
+tokens, 27.1 s in all.
+
+- **Context against prompt speed.** This build materializes the relative-position bias as a heads x context x
+  micro-batch F32 table, so the compute buffer grows with context times `-ub`: 25.5 GB at 256K with `-ub 512`, which
+  doesn't load. Writing speed doesn't depend on it; prompt reading does.
+- **Not memory-bound.** Q8_0 reads twice the bytes and is only 9% slower. While it writes, the 5090 runs at 96% and
+  ~260 W with 11,826 graph nodes a token and 2 graph splits (nothing on the CPU): the limit is the number of small
+  kernels in 48 layer passes. A dense 27B runs fewer, larger matrix multiplies. A drafter is the obvious lever,
+  since one verify pass costs about one step: mainline's DSpark support (#32218, open) doesn't cover the loop yet.
+- **One card.** The compute buffer stays on the first card, so a layer split would only add the slower 3090. Q8_0 on
+  both cards didn't load.
+
+**Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): 21 of 25 (22 lenient) at
+reasoning effort `max` with the card's sampling, coding 4 of 7, 165 minutes, 773K tokens at 78 tok/s.

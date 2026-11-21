@@ -240,7 +240,7 @@ The same 13 runs, started the same way. New prompts, tok/s:
 
 25 seeded tasks (traces, long multiplication, logic grids, routing and knapsack, constrained writing, a 200-row table, a
 52K-token retrieval chain, 7 programs against hidden tests, a 7-file tool-driven repair). Each model ran at its card's
-sampling and top reasoning effort, with thinking caps off and as much output as the box allows. All at DDR5-3600 except Hy4 Flash (DDR5-4200).
+sampling and top reasoning effort, with thinking caps off and as much output as the box allows. All at DDR5-3600 except Hy4 Flash and Inkling 2 Mini (DDR5-4200).
 Details and per-task results: [`docs/hard-test.md`](docs/hard-test.md).
 
 | Model | Score /25 | Coding /7 | Wall time | Tokens | Avg decode |
@@ -248,6 +248,7 @@ Details and per-task results: [`docs/hard-test.md`](docs/hard-test.md).
 | Hy4 Flash AngelSlim Q3_K (maya-hy4, both cards) | 24 | 6 | 68 min | 301K | 74 tok/s |
 | Qwen3.8-Flash-Next IQ3_S | 22 | 4 | 51 min | 711K | 233 tok/s |
 | Inkling 2 Small own 2-bit (IQ2_XXS mix) | 22 | 4 | 184 min | 481K | 44 tok/s |
+| Inkling 2 Mini IQ4_NL (llama.cpp, the 5090 alone) | 21 (22 lenient) | 4 | 165 min | 773K | 78 tok/s |
 | Inkling-Small UD-Q4_K_XL | 21 | 3 | 279 min | 671K | 40 tok/s |
 | Ling-3.1-flash IQ2_XS | 21 (2 cut off at 128K ctx) | 3 | 744 min | 992K | 22 tok/s |
 | Qwen3.8-Flash-Next UD-Q4_K_XL | 21 | 3 | 92 min | 830K | 150 tok/s |
@@ -266,6 +267,7 @@ Details and per-task results: [`docs/hard-test.md`](docs/hard-test.md).
 - **GLM effort:** GLM at `max` thinks past any budget; 10 of its 25 answers hit 131K. `high` and `low` with 262K solved five of those, plus the repair job, so for hard work use `high`, not GLM's default.
 - **MiMo checkpoints:** MiMo's MOPD checkpoint scores the same as RL, but codes better: 3 of 7 against 1. It runs at the same speed and writes 19% fewer tokens.
 - **Hy4 Flash** (2026-11-19) on maya-hy4, an engine written for it in the Project Maya fork: 24 of 25, the best score here, with 6 of 7 coding tasks, the fewest tokens of any run at 20 or more, in 68 minutes. Its one miss is a backreference bug in the regex engine. It's one run at temperature 0.9, so read it as close to the 22s. Flash-Next's later runs on Basalt with the UD-IQ3_XXS pack (22 strict, 23 lenient, 7 of 7 coding) aren't in this repo yet.
+- **Inkling 2 Mini** (2026-11-20, 26.4B with 3.4B active, a looped MoE whose middle layers run three times a token) on llama.cpp at #32694, on the 5090 alone: 21 of 25 (22 lenient), level with Inkling-Small and Ling at a tenth of their size, with 4 of 7 coding tasks in 165 minutes. It thinks long (773K tokens). It writes 91 tok/s on new prompts, held back by the many small kernels of 48 layer passes a token, not by memory.
 - **Inkling 2 Small**, converted here to 2 bits from the release's NVFP4, ties Flash-Next at 22 and is the first run to pass both JSON and SAT. Two of its three misses are one-line bugs, and it wrote the fewest tokens of any run at 20 or more.
 
 How each model lost its points. Per miss, with patterns across models: [`docs/failure-modes.md`](docs/failure-modes.md).
@@ -275,6 +277,7 @@ How each model lost its points. Per miss, with patterns across models: [`docs/fa
 | Hy4 Flash | 1 | Code only: off-by-one backreferences in the regex engine |
 | Flash-Next IQ3_S | 3 | Runs of zeros that Strata's repeat guard stops early; one slow program |
 | Inkling 2 Small | 3 | Code only: lazy quantifiers ruled out of scope, a `continue` in the wrong loop, a solver stuck on the classic worst-case puzzle |
+| Inkling 2 Mini | 4 | A 9-city route searched by hand and missed by 3; a backtracking regex engine; two Scheme bugs; a one-line JSON slip |
 | Inkling-Small | 4 | Code only: two too slow, two bugs |
 | Ling-3.1-flash | 4 | Code only: two still thinking at the 128K context, two bugs |
 | Flash-Next UD-Q4_K_XL | 4 | Code only: bugs, a slow program, a loop |

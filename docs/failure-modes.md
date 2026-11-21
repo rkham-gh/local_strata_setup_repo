@@ -28,6 +28,7 @@ tasks flip between runs: Flash-Next IQ3_S's 262K re-runs gained two tasks over i
 | Hy4 Flash Q3_K | 24 | | | | 1 | | | | | 5% |
 | Qwen3.8-Flash-Next IQ3_S | 22 | | | | | 1 | 2 | | | 17% |
 | Inkling 2 Small | 22 | | | | 2 | 1 | | | | 17% |
+| Inkling 2 Mini IQ4_NL | 21 (22) | | | 1 | 2 | 1 | | | | 39% |
 | Inkling-Small | 21 | | | | 2 | 2 | | | | 28% |
 | Ling-3.1-flash | 21 | | | | 2 | | | 2 (128K context) | | 42% |
 | Qwen3.8-Flash-Next UD-Q4_K_XL | 21 | | | | 2 | 1 | 1 | | | 32% |
@@ -91,6 +92,25 @@ which its 24K run had solved, so it reads as even with IQ3_S.
 - **Bugs.** Scheme raises its own `not a procedure`. SAT calls a satisfiable formula unsatisfiable.
 - **Slow, Sudoku.** It timed out.
 - **Loop, JSON.** `1e1000…` zeros, stopped by Strata at 4.6K tokens in the 24K round.
+
+### Inkling 2 Mini IQ4_NL
+
+A 26.4B model with 3.4B active (a looped MoE), on llama.cpp, on one card. It got every non-coding task but the 9-city
+route, and 4 of 7 coding tasks. It thinks long (773K tokens in all), and 39% of its output went to the four misses:
+more than Inkling-Small (28%), less than Ling (42%).
+- **Wrong, tour-9.** A search it couldn't finish by hand: 217K characters (117K tokens, 26 minutes, near the 128K
+  context) of arithmetic over endpoint pairs and partial paths, then a tour of cost 244 against the best 241, given
+  with confidence. It never enumerated the 20,160 tours. Inkling 2 Small solved it in 68K tokens.
+- **Slow, regex.** Exponential backtracking: 397 of the 400 cases agree with Python, but the fixed case `(a*)*b` on
+  25 a's and a b runs past 10 s with no memo, and the checker's limit ended the run. The other two misses are lazy
+  quantifiers (`((c|c))+?`, `[a-c](.)*?`), as for Inkling 2 Small.
+- **Bug, Scheme.** Two bugs. `(define (f a b) ...)` requires the name list to have exactly two items and reads the
+  second as the parameter list, so `(define (loop i acc) ...)` and `(define (f) ...)` raise `bad define`, and
+  `(define (fact n) ...)` binds `n` as a rest list. With that fixed it passes 15 of the 16 checks; the variadic
+  `(lambda args ...)` still fails with `wrong number of arguments`.
+- **Bug, JSON (lenient).** A one-line slip: the main loop opens with `i = skip_ws(i)` and nothing sets `i` first, so
+  every call raises `UnboundLocalError`. With `i = 0` added it passes the whole check.
+- **Repair.** 10/10 in 103 s, 12 turns, 21 tool calls, and it called `finish`.
 
 ### Inkling-Small
 
@@ -297,6 +317,7 @@ ends them:
 | Hy4 Flash | 6 | 22.2K |
 | Nemotron Q3 | 0 | 24.4K |
 | MiMo MOPD | 3 | 34.0K |
+| Inkling 2 Mini | 4 | 49.9K |
 | Inkling-Small | 3 | 50.3K |
 | MiMo RL | 1 | 56.1K |
 | DeepSeek Coder | 2 | 58.3K |
@@ -356,6 +377,7 @@ Every run at its best passed it 10/10 except GLM at `max`. They differ in how th
 | Flash-Next IQ3_S (24K round) | 10/10 | 22 | 29 | yes | 17.1K | 90 s |
 | Inkling-Small | 10/10 | 24 | 24 | no | 12.4K | 408 s |
 | Inkling 2 Small | 10/10 | 8 | 17 | yes | 7.8K | 234 s |
+| Inkling 2 Mini | 10/10 | 12 | 21 | yes | 8.2K | 103 s |
 | Hy4 Flash | 10/10 | 13 | 25 | yes | 17.1K | 272 s |
 | Ling-3.1-flash | 10/10 | 6 | 20 | yes | 25.3K | 1,217 s |
 | Flash-Next Q4 (24K round) | 10/10 | 14 | 19 | yes | 12.8K | 107 s |
