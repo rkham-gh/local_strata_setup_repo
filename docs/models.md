@@ -34,7 +34,9 @@ recorded. Every speed in this file is at DDR5-3600; the README's
 | Ling-3.1-flash | 564B / 25B | bartowski IQ2_XS, 177.4 GB | maya-ling | 128K | 22.4 tok/s | 876 tok/s | ~160 GB (24 GB free) |
 | Ripple-65B Preview | 65B, dense | AtomicChat AD-IQ4_XS, 38.7 GB + 2.3 GB DFlash2 drafter | llama.cpp b12314 + #31904, **both cards** | 192K | 50.5 tok/s | ~1,330 tok/s | a few GB |
 | Hy4 Flash | 224B with a 63.4B Engram table | AngelSlim Q3_K, 144.7 GiB + 1.69 GB DFly2 drafter | maya-hy4, branch `hy4`, **both cards** | 128K | 66-71 tok/s (DDR5-4200) | ~1,900-2,000 tok/s (DDR5-4200) | ~140 GB (31-47 GB free) |
-| Inkling 2 Mini | 26.4B / 3.4B (a looped MoE: 48 layer passes from 24 layers) | ggml-org IQ4_NL, 17.6 GB | llama.cpp at #32694 (`29b52d3`), the 5090 alone | 128K (1M natively) | 91.2 tok/s (DDR5-4200) | 1,127 tok/s | a few GB |
+| Hy4 Flash, the 5090 alone | as above | the same Q3_K converted as is to a Basalt pack, 147 GiB, + the DFly2 drafter | Basalt 0.5.5 | 128K | 56.7 tok/s (DDR5-4200) | 2,907 tok/s | ~92 GB (~100 GB free) |
+| Inkling 2 Mini | 26.4B / 3.4B (a looped MoE: 48 layer passes from 24 layers) | Basalt's NVFP4-q8 pack, 19.7 GB (the release's NVFP4 experts kept bit for bit) | Basalt 0.5.5, the 5090 alone (since 2026-11-21) | 256K (1M natively) | 335-338 tok/s (DDR5-4200) | ~11,000 tok/s | a few GB |
+| Inkling 2 Mini, llama.cpp | as above | Unsloth UD-Q4_K_XL, 17.6 GB | Unsloth's llama.cpp mix + own CUDA fusions, the 5090 alone (2026-11-20 to 11-21) | 256K | 147.8 tok/s (DDR5-4200; 91.2 on mainline at #32694 with IQ4_NL) | 3,228 tok/s | a few GB |
 
 Flash-Next's UD-Q4_K_XL was measured, then deleted; its numbers are in section 1.
 
@@ -1215,13 +1217,47 @@ is 92.5% top-1: timing decides which card computes an expert.
 **Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): 24 of 25 at reasoning
 effort `max` with Tencent's sampling, coding 6 of 7, 68 minutes, 301K tokens: the best score here, from one run.
 
-## 14. Inkling 2 Mini (llama.cpp, the 5090 alone)
+**Three engines on the same file (2026-11-21).** Upstream Project Maya (v1.1.72) has its own Hy4 engine, also called
+maya-hy4 but separate code (contributed upstream on 2026-11-18, the day this fork's was written), and Basalt 0.5.5 has
+Hy4 too. Each ran AngelSlim's Q3_K: upstream's packer indexes the GGUF set in place; Basalt's converter copies it into
+its own format as it is (147 GiB, nothing requantized) with Tencent's DFly2 drafter attached. Basalt can only add a
+second card that is also a Blackwell, so it ran on the 5090 alone. Same clients for all, capped 450 / 320 W, in the
+order fork, upstream, Basalt, fork, upstream (the fork and upstream twice):
+
+| | This fork's maya-hy4, both cards, DFly2 | Upstream maya-hy4, both cards, its MTP block | Basalt 0.5.5, the 5090 alone, DFly2 |
+|---|---|---|---|
+| Decode, new prompts (`ab.py`) | **68.3 / 66.2 tok/s** | 29.3 / 24.2 | 56.7 |
+| Decode at Tencent's sampling, thinking on | **66.6 / 66.3** (61-66% of drafts kept) | 25.6 / 26.9 (62-66%) | 56.5 (77%) |
+| Prefill, 33K prompt | 1,916 / 1,931 tok/s (17 s) | 507 / 504 (65 s) | **2,907 (11.4 s)** |
+| Decode after it | 56.6 / 42.1 | 30.4 / 31.4 | **68.9** |
+| A repeated prompt, last time | **88.2 / 82.2** | 54.2 / 50.7 | 66.4 |
+| `turns.py` | **22.2 / 21.7 s** | 58.9 / 58.9 s | 25.5 s |
+| Ready after | 133-141 s | 146 s (the first start measures the PC for 60 s), then 81 s | 54 s |
+| VRAM (5090 / 3090), RAM free | 29.9 / 22.5 GB, ~39 GB | 30.6 / 23.1 GB, 83-120 GB | 30.7 GB / -, ~100 GB |
+
+- **This fork writes fastest** and has the quickest agent turns. Basalt reads long prompts 1.5 times faster and writes
+  faster right after one, on one card. Facts were 8 of 8 on all three.
+- **Why upstream is slow here.** Its default on these mismatched cards is a layer split (the 5090 layers 0-21, the 3090
+  22-41), with only 38% of the routed experts in VRAM (7,913 of 20,992) and the rest computed by 16 CPU threads from the
+  model's file through the OS file cache. This fork pins every routed expert in RAM and gives the 3090 only extra
+  experts to hold. Upstream's second start, with its learned expert placement, was no faster. Its setup's fitted flags
+  weren't used, so a tuned upstream may do better.
+- **Basalt is the one-card option.** As a separate route on the 5090 alone, it started and ran normally with an 18 GB job
+  holding the 3090, which stayed untouched. Its greedy text isn't repeatable from start to start on one card (two stock
+  starts, two different outputs), since part of the expert work runs on the CPU with placement that adapts.
+- Basalt 0.5.0 on this file (2026-11-19, in the table above) was 53.2 tok/s and 3,020 tok/s.
+
+## 14. Inkling 2 Mini (Basalt 0.5.5 since 2026-11-21; llama.cpp before, the 5090 alone)
 
 Thinking Machines' Inkling 2 Mini (released 2026-11-20, Apache 2.0), text and pictures in. It's the smallest Inkling 2
 and the first looped model here: layers 6-17 of its 24 run three times for every token with the same weights, each
-pass with its own cache. Neither Project Maya nor Basalt had it, and the whole model fits in the 5090's VRAM, so it
-runs on llama.cpp, built from the commit that added it (ggml-org/llama.cpp#32694, `29b52d3`, merged that evening,
-before any release build had it). Measured at DDR5-4200 with both cards at their stock power limits (450 / 320 W).
+pass with its own cache. On release day neither Project Maya nor Basalt had it, and the whole model fits in the 5090's
+VRAM, so it first ran on llama.cpp, built from the commit that added it (ggml-org/llama.cpp#32694, `29b52d3`, merged
+that evening, before any release build had it). The same night it moved to Unsloth's llama.cpp mix with this PC's own
+CUDA fusions (148 tok/s), and on 2026-11-21 to Basalt 0.5.5 (335 tok/s): both further down. Measured at DDR5-4200 with
+both cards at their stock power limits (450 / 320 W).
+
+The table below is the first, mainline build:
 
 | | |
 |---|---|
@@ -1259,3 +1295,77 @@ tokens, 27.1 s in all.
 
 **Hard test** ([hard-test.md](hard-test.md); misses: [failure-modes.md](failure-modes.md)): 21 of 25 (22 lenient) at
 reasoning effort `max` with the card's sampling, coding 4 of 7, 165 minutes, 773K tokens at 78 tok/s.
+
+### Unsloth's llama.cpp mix and own CUDA fusions (2026-11-20)
+
+Unsloth's release source `llama.cpp-source-b12588-mix-c0c3de8` merges upstream b12588 with their loop PR
+(unslothai#389), DSpark (ggml-org#32218) and a banded relative-bias attention (unslothai#385/#386). Its loop layout
+needs their own GGUFs, so this ran Unsloth's UD-Q4_K_XL (17.63 GB; theirs: KLD 0.0107 against BF16, top-1 98.0%) with
+ggml-org's picture encoder. The banded attention needs no heads x context x micro-batch table, so 256K fits with
+`-ub 512`.
+
+| `ab.py`, the 5090 alone | New prompts | Sampled (temp 1) | After a 41K prompt | Repeats | Prefill, that prompt | `turns.py` |
+|---|---|---|---|---|---|---|
+| Mainline `29b52d3`, IQ4_NL, 128K, `-ub 256` (above) | 91.2 tok/s | - | 79.2 | 90 | 1,127 tok/s | 27.1 s |
+| Unsloth's mix, UD-Q4_K_XL, 128K, `-ub 256` | 92.0 | 88.7 | 81.9 | 91.8 | 1,554 | - |
+| The same with the model's DSpark drafter, 3 / 5 / 7 drafted tokens | 85.7 / 82.3 / 73.5 | 82.1 / 78.9 / 75.7 | 94.0 / 95.8 / 89.6 | 111.6 / 106.9 / 105.5 | ~1,460 | - |
+| With this PC's CUDA fusions, 128K, `-ub 256` | 147.3 | 138.7 | 124.5 | 145.6 | 2,512 | 15.7 s |
+| **With the fusions, 256K, `-ub 512`, pictures on (served 2026-11-20/21)** | **147.8** | 135.5-139.5 | **124.5** | **146.7** | **3,228 (12.9 s)** | **13.8 s** |
+
+- **The drafter doesn't pay on llama.cpp.** 20-60% of drafts are accepted, and a draft-and-verify step costs about 2.5
+  single tokens through the 48 passes: new text is slower at every draft length; only repeats and long chats gain.
+- **The fusions.** Decode was bound by the number of kernels, ~7,000 a token (11,826 graph nodes), not by memory: CUDA
+  graphs were already on (off: 18 tok/s), `GGML_CUDA_GRAPH_OPT` and the graph chunk size changed nothing, PDL was worth
+  9%. Fusing Inkling 2's small-op chains into single kernels (the q/k norm clips, the loop's message gates and their
+  inputs, the short convolutions with their state, dynamic taps and residual, the SwiGLU-with-softcaps activation, the
+  expert sum, the depth attention over earlier blocks, the relative-position mask), computing the loop pass's message
+  mixes once for all 12 core layers, and letting ggml's top-k MoE fusion accept Inkling's routing, brought it to 2,272
+  launches a token: 92 to 148 tok/s.
+- **They don't change predictions.** On 2,000 teacher-forced decode positions of text written after the model's
+  training, every fusion on against every fusion off moves the true token's log-prob by +0.004 nats (block-bootstrap
+  95% interval -0.002 to +0.010) and how often the top token is the true one by +0.05 points (-0.40 to +0.50), mean KL
+  0.0048 (ggml's own fusions on/off: 0.0045). Switching each fusion off alone moves nothing outside its interval.
+  `llama-perplexity`'s KL mode couldn't open its logits file on this build, so the check ran through the server
+  (`n_probs` 20).
+- **Checks:** tools 5 of 5 (`tool_choice: "required"` too, unlike mainline), `response_format`, pictures, facts 8 of 8,
+  the agent task in 5 turns, `derail.py` 0 of 20.
+- **For scale:** a llama.cpp issue reports ~52 tok/s on a 5090; SGLang's announcement claims 168 (not verified here).
+- **Hard test:** 19 of 25 in 91 minutes, 3 of 7 coding, 678K tokens at 124 tok/s.
+
+### Basalt 0.5.5 (2026-11-21, the engine since)
+
+Basalt added Inkling 2 Mini in 0.5.5 (2026-11-21): one card, chat, tools, thinking levels, pictures, the DSpark
+drafter, up to 1M context. Its pack, `Inkling-2-Mini-NVFP4-q8.basalt` (19.7 GB, built from the official release),
+keeps layers 0-19's NVFP4 experts bit for bit (the same bits Unsloth's UD-Q4_K_XL keeps there), rounds layers 20-23's
+MXFP8 experts and the other projections to Q8_0, and carries the picture encoder and the drafter (theirs: mean KLD
+0.00305 and top-1 97.76% against the release with its experts made BF16, which isn't a true BF16 model). Close to the
+llama.cpp file, not the same. Project Maya v1.1.72 added its own engine for it the same day (`maya-ik2`), a Linux
+preview with Windows only behind an untested switch (its author: 112-125 tok/s on an RTX 3090), not run here.
+
+| Same clients, 256K, f16 cache, pictures on | New prompts | Sampled (temp 1) | After a 41K prompt | Repeats | Prefill, that prompt | `turns.py` | VRAM |
+|---|---|---|---|---|---|---|---|
+| Fused llama.cpp, UD-Q4_K_XL, two runs | 147.7 / 148.6 tok/s | 135.5 / 139.5 | 124-126 | 145-148 | 3,230 tok/s (12.9 s) | 13.7-13.9 s | 28.2 GB |
+| Basalt, no drafter | 251.6 | 239.0 | 183.9 | 251 | 12,215 (3.4 s) | 5.8 s | 26.6 GB |
+| **Basalt, its DSpark drafter (default), three runs** | **334-338** | **327-328** (65-68% of drafts kept) | **264-308** | 347-356 | ~10,900-11,000 (3.8 s) | **4.7-4.8 s** | 28.3 GB |
+
+- **2.3 times the fused build with the drafter, 1.7 times without**, prompts 3.4-3.8 times as fast, agent turns in a
+  third of the time. Greedy text with and without the drafter is the same.
+- **Why:** Basalt is written for this model. A layer pass is about a dozen kernels (one norm for the depth mix and the
+  loop messages, q/k/v as one product, one attention kernel with the convolutions, clips, cache writes, relative bias,
+  sinks and gate inside, the output product, one kernel for the second convolution and the residual, the router, an
+  expert plan, one grouped expert kernel, one finish): ~500-600 launches a token against the fused build's 2,272. A
+  token replays as one CUDA graph with programmatic dependent launch, and a side stream runs the next layer's router
+  early to pull the guessed experts into L2. Plain decode (4.0 ms a token here) is still about twice what reading the
+  weights takes.
+- **Checks:** tools 4 of 5 (`tool_choice: "required"` isn't supported; Basalt documents only `auto`), `response_format`,
+  pictures, facts 8 of 8, the agent task, `derail.py` 0 of 20, a `max_tokens` of 262,144 answered.
+- **Hard test:** 20 of 25 (21 lenient) in 33 minutes, 3 of 7 coding, 635K tokens at 319 tok/s, with Basalt's
+  `answer-room` at 8192 so thinking isn't ended at three quarters of the budget. Three runs on three setups (21, 19, 20)
+  read as one model scoring about 20.
+- **On Windows, two things to know.** `basalt.exe serve` runs the Python server as its child; on this PC both failed to
+  write in the user profile (the engine log under `%USERPROFILE%\.cache\basalt`, a picture's rows under `%TEMP%`). The
+  cause: the folder they were unpacked into had inherited a Low mandatory integrity label from a sandbox tool, so the
+  exe and its children ran at Low integrity. Starting the server with a venv Python and `--engine-bin` (or relabelling
+  the folder Medium) fixes it; `icacls <folder>` shows the label.
+- And on llama-server: its built-in web page answers `415 Unsupported Media Type` to a client that doesn't accept gzip.
+  Browsers do, so this only matters for scripts checking the page.

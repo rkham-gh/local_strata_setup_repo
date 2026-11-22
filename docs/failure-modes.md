@@ -29,6 +29,8 @@ tasks flip between runs: Flash-Next IQ3_S's 262K re-runs gained two tasks over i
 | Qwen3.8-Flash-Next IQ3_S | 22 | | | | | 1 | 2 | | | 17% |
 | Inkling 2 Small | 22 | | | | 2 | 1 | | | | 17% |
 | Inkling 2 Mini IQ4_NL | 21 (22) | | | 1 | 2 | 1 | | | | 39% |
+| Inkling 2 Mini, Basalt | 20 (21) | | | 1 | 4 | | | | | 42% |
+| Inkling 2 Mini, fused llama.cpp | 19 | | 2 | | 3 | 1 | | | | 36% |
 | Inkling-Small | 21 | | | | 2 | 2 | | | | 28% |
 | Ling-3.1-flash | 21 | | | | 2 | | | 2 (128K context) | | 42% |
 | Qwen3.8-Flash-Next UD-Q4_K_XL | 21 | | | | 2 | 1 | 1 | | | 32% |
@@ -111,6 +113,35 @@ more than Inkling-Small (28%), less than Ling (42%).
 - **Bug, JSON (lenient).** A one-line slip: the main loop opens with `i = skip_ws(i)` and nothing sets `i` first, so
   every call raises `UnboundLocalError`. With `i = 0` added it passes the whole check.
 - **Repair.** 10/10 in 103 s, 12 turns, 21 tool calls, and it called `finish`.
+
+### Inkling 2 Mini, fused llama.cpp and Basalt
+
+The same model on two faster engines (2026-11-20/21, [models.md](models.md) section 14): Unsloth's UD-Q4_K_XL on the
+fused llama.cpp build (19), and Basalt's own pack on Basalt 0.5.5 (20, 21 lenient). Regex, Scheme and JSON failed in all
+three of its runs, each time differently.
+
+Fused llama.cpp, six misses (36% of its tokens):
+- **Slip, trace-2.** The first and last values right (6 and `[]`), the middle list wrong (`[51, 27, 67]` for
+  `[81, 91, 11]`), after 11.7K tokens, given with confidence.
+- **Slip, grid-4x3.** Every attribute placed in 1,749 tokens but the drinks of houses 3 and 4 swapped (tea and milk).
+  The other two runs solved it.
+- **Bug, regex.** The parser raises `dangling operator` on a pattern in the checker's cases, so the run stops there.
+- **Bug, Scheme.** After 135K tokens (20 minutes) the interpreter has no `display` builtin: the first check that prints
+  fails with `unbound variable: display`.
+- **Slow, Sudoku.** Right answers, 21.6 s on the timed puzzles against the 10 s limit.
+- **Bug, JSON.** It rejects a valid `\uXXXX` escape (`Invalid \uXXXX escape`); not a one-line fix.
+- **Repair.** 10/10 in 67 s, 8 turns, 17 tool calls, and it called `finish`.
+
+Basalt, five misses (42%):
+- **Wrong, tour-9.** 244 against the best 241 after 55K tokens, the first run's miss again.
+- **Bug, regex.** `parse()` declares `nonlocal pos, group_count` that its enclosing function never binds: a
+  `SyntaxError` before anything runs. With them bound it still gets 84 of 400 cases wrong (`a*b` on `aaab` among them).
+- **Bug, Scheme.** After 97K tokens a check fails with `wrong number of arguments` in procedure application.
+- **Bug, ordered multiset.** After the checker's mixed inserts and removals its size no longer matches the reference
+  (`len(b) == len(ref)` fails). The other two runs solved it.
+- **Bug, JSON (lenient).** Every escape handled but the solidus `\/`, so it raises `Invalid escape`; with one added
+  branch it passes the whole check.
+- **Repair.** 10/10 in 18.5 s, 7 turns, 15 tool calls, and it called `finish`: the fastest repair here.
 
 ### Inkling-Small
 
@@ -318,6 +349,8 @@ ends them:
 | Nemotron Q3 | 0 | 24.4K |
 | MiMo MOPD | 3 | 34.0K |
 | Inkling 2 Mini | 4 | 49.9K |
+| Inkling 2 Mini, Basalt | 3 | 45.0K |
+| Inkling 2 Mini, fused | 3 | 47.1K |
 | Inkling-Small | 3 | 50.3K |
 | MiMo RL | 1 | 56.1K |
 | DeepSeek Coder | 2 | 58.3K |
@@ -378,6 +411,8 @@ Every run at its best passed it 10/10 except GLM at `max`. They differ in how th
 | Inkling-Small | 10/10 | 24 | 24 | no | 12.4K | 408 s |
 | Inkling 2 Small | 10/10 | 8 | 17 | yes | 7.8K | 234 s |
 | Inkling 2 Mini | 10/10 | 12 | 21 | yes | 8.2K | 103 s |
+| Inkling 2 Mini, fused | 10/10 | 8 | 17 | yes | 8.7K | 67 s |
+| Inkling 2 Mini, Basalt | 10/10 | 7 | 15 | yes | 6.9K | 19 s |
 | Hy4 Flash | 10/10 | 13 | 25 | yes | 17.1K | 272 s |
 | Ling-3.1-flash | 10/10 | 6 | 20 | yes | 25.3K | 1,217 s |
 | Flash-Next Q4 (24K round) | 10/10 | 14 | 19 | yes | 12.8K | 107 s |

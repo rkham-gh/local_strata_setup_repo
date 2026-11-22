@@ -18,7 +18,7 @@ number here is a DDR5-3600 figure unless it says 4400 or 4200;
 | Second GPU | RTX 3090 24 GB, 320 W limit, since 2026-11-11. Rows that use it say so |
 | PCIe | 5090: Gen5 **x8**, 28.7 GB/s H2D pinned. 3090: Gen4 x8, 13.3 GB/s |
 | RAM | 192 GB DDR5 (2x32 + 2x64), rated 5600, no ECC. **4200 MT/s since 2026-11-15** (4400 failed a stress test); 3600 before, AMD's rating for four dual-rank sticks. At 3600 the CPU expert lanes saw 37-50 GB/s |
-| OS / stack | Windows 11 Pro 26300, CUDA 13.4, llama.cpp b12017 (Ripple-65B: b12314, CUDA 13.5), Strata 0.2.10 (engine 0.1.56), Project Maya v1.1.52 (v1.1.60 since 2026-11-11) |
+| OS / stack | Windows 11 Pro 26300, CUDA 13.4, llama.cpp b12017 (Ripple-65B: b12314, CUDA 13.5), Strata 0.2.10 (engine 0.1.56), Project Maya v1.1.52 (v1.1.60 since 2026-11-11). Basalt 0.4.1 / 0.5.5 for Flash-Next, Qwen3.8-27B and Inkling 2 Mini since 2026-11-16 / 11-21 |
 
 The big MoEs here are RAM-bandwidth-bound on decode and PCIe-bound on prefill, so expect higher numbers on DDR5-5600+
 and x16. 3600 to 4400 made the ones that compute experts from RAM 4-15% faster on decode; 4200 keeps all but 0-3% of
@@ -28,7 +28,8 @@ that.
 
 `ab.py` (greedy, thinking off) at DDR5-3600: decode on six unseen prompts, prefill and TTFT on an unseen ~33K-token
 prompt. Runs on expert-caching engines start from the same saved expert profile, 3+ runs each. Rows marked † are decode
-with thinking on at the model's own sampling (`spec-sweep.py`), where drafting matters.
+with thinking on at the model's own sampling (`spec-sweep.py`), where drafting matters. The Hy4 Flash and Inkling 2
+Mini rows are at DDR5-4200 (2026-11-19 to 11-21), with a ~41K prompt for Inkling 2 Mini.
 
 | Model, quant | Setup | Decode tok/s | Decode after 33K | Prefill tok/s | TTFT at 33K |
 |---|---|---|---|---|---|
@@ -74,6 +75,13 @@ with thinking on at the model's own sampling (`spec-sweep.py`), where drafting m
 | **Ripple-65B Preview** AD-IQ4_XS (dense, both cards) | llama.cpp b12314, layer split (default) | 26.6 | 22.7 | 1,313 | |
 | | llama.cpp b12314, `-sm tensor` 65:35 | 40.8 | 35.2 | 1,091 | |
 | | **b12314 + #31904, layer split 65:35, DFlash2 drafter on the 3090** | **50.5** | **44.8** | 1,331 | 24 s |
+| **Hy4 Flash** AngelSlim Q3_K | llama.cpp PR #32517 | 17.2 | 20.0 | 185 | |
+| | upstream Project Maya v1.1.72 (its own maya-hy4), both cards, defaults | 24-29 | 30-31 | ~505 | 65 s |
+| | Basalt 0.5.5, the 5090 alone, DFly2 drafter | 56.7 | 68.9 | 2,907 | 11.4 s |
+| | **maya-hy4 (this fork), both cards, DFly2 drafter** | **66-68** | 42-57 | ~1,920 | 17 s |
+| **Inkling 2 Mini** (26.4B / 3.4B, looped) | llama.cpp at #32694, ggml-org IQ4_NL, 128K | 91.2 | 79.2 | 1,127 | 37 s |
+| | Unsloth's llama.cpp mix + own CUDA fusions, UD-Q4_K_XL, 256K | 147.8 | 124.5 | 3,228 | 12.9 s |
+| | **Basalt 0.5.5, its NVFP4-q8 pack, DSpark drafter, 256K** | **334-338** | **264-308** | **~11,000** | **3.8 s** |
 
 Sampled drafts (2026-11-12): llama.cpp's `--spec-draft-sampling probabilistic` samples the draft and verifies it by
 rejection sampling, exact in distribution. At these models' temperature 1.0 it accepts far more of an MTP head's or a
@@ -249,6 +257,8 @@ Details and per-task results: [`docs/hard-test.md`](docs/hard-test.md).
 | Qwen3.8-Flash-Next IQ3_S | 22 | 4 | 51 min | 711K | 233 tok/s |
 | Inkling 2 Small own 2-bit (IQ2_XXS mix) | 22 | 4 | 184 min | 481K | 44 tok/s |
 | Inkling 2 Mini IQ4_NL (llama.cpp, the 5090 alone) | 21 (22 lenient) | 4 | 165 min | 773K | 78 tok/s |
+| Inkling 2 Mini, Basalt's pack (Basalt 0.5.5, the 5090 alone) | 20 (21 lenient) | 3 | 33 min | 635K | 319 tok/s |
+| Inkling 2 Mini UD-Q4_K_XL (fused llama.cpp, the 5090 alone) | 19 | 3 | 91 min | 678K | 124 tok/s |
 | Inkling-Small UD-Q4_K_XL | 21 | 3 | 279 min | 671K | 40 tok/s |
 | Ling-3.1-flash IQ2_XS | 21 (2 cut off at 128K ctx) | 3 | 744 min | 992K | 22 tok/s |
 | Qwen3.8-Flash-Next UD-Q4_K_XL | 21 | 3 | 92 min | 830K | 150 tok/s |
@@ -267,7 +277,7 @@ Details and per-task results: [`docs/hard-test.md`](docs/hard-test.md).
 - **GLM effort:** GLM at `max` thinks past any budget; 10 of its 25 answers hit 131K. `high` and `low` with 262K solved five of those, plus the repair job, so for hard work use `high`, not GLM's default.
 - **MiMo checkpoints:** MiMo's MOPD checkpoint scores the same as RL, but codes better: 3 of 7 against 1. It runs at the same speed and writes 19% fewer tokens.
 - **Hy4 Flash** (2026-11-19) on maya-hy4, an engine written for it in the Project Maya fork: 24 of 25, the best score here, with 6 of 7 coding tasks, the fewest tokens of any run at 20 or more, in 68 minutes. Its one miss is a backreference bug in the regex engine. It's one run at temperature 0.9, so read it as close to the 22s. Flash-Next's later runs on Basalt with the UD-IQ3_XXS pack (22 strict, 23 lenient, 7 of 7 coding) aren't in this repo yet.
-- **Inkling 2 Mini** (2026-11-20, 26.4B with 3.4B active, a looped MoE whose middle layers run three times a token) on llama.cpp at #32694, on the 5090 alone: 21 of 25 (22 lenient), level with Inkling-Small and Ling at a tenth of their size, with 4 of 7 coding tasks in 165 minutes. It thinks long (773K tokens). It writes 91 tok/s on new prompts, held back by the many small kernels of 48 layer passes a token, not by memory.
+- **Inkling 2 Mini** (2026-11-20, 26.4B with 3.4B active, a looped MoE whose middle layers run three times a token) on llama.cpp at #32694, on the 5090 alone: 21 of 25 (22 lenient), level with Inkling-Small and Ling at a tenth of their size, with 4 of 7 coding tasks in 165 minutes. It thinks long (773K tokens). It writes 91 tok/s on new prompts, held back by the many small kernels of 48 layer passes a token, not by memory. Fusing those kernels in llama.cpp took it to 148 tok/s (19 of 25 in 91 minutes), and Basalt 0.5.5, written for the model, to 335 (20, 21 lenient, in 33 minutes, the fastest run at 20 or more). Three runs on three setups read as one model at about 20.
 - **Inkling 2 Small**, converted here to 2 bits from the release's NVFP4, ties Flash-Next at 22 and is the first run to pass both JSON and SAT. Two of its three misses are one-line bugs, and it wrote the fewest tokens of any run at 20 or more.
 
 How each model lost its points. Per miss, with patterns across models: [`docs/failure-modes.md`](docs/failure-modes.md).
@@ -278,6 +288,8 @@ How each model lost its points. Per miss, with patterns across models: [`docs/fa
 | Flash-Next IQ3_S | 3 | Runs of zeros that Strata's repeat guard stops early; one slow program |
 | Inkling 2 Small | 3 | Code only: lazy quantifiers ruled out of scope, a `continue` in the wrong loop, a solver stuck on the classic worst-case puzzle |
 | Inkling 2 Mini | 4 | A 9-city route searched by hand and missed by 3; a backtracking regex engine; two Scheme bugs; a one-line JSON slip |
+| Inkling 2 Mini, Basalt | 5 | A route missed by 3 again; four coding bugs, one a one-branch JSON slip |
+| Inkling 2 Mini, fused llama.cpp | 6 | Two slips (a trace, a grid); three coding bugs; one slow solver |
 | Inkling-Small | 4 | Code only: two too slow, two bugs |
 | Ling-3.1-flash | 4 | Code only: two still thinking at the 128K context, two bugs |
 | Flash-Next UD-Q4_K_XL | 4 | Code only: bugs, a slow program, a loop |
